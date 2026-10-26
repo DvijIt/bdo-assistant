@@ -10,6 +10,8 @@ type Task = {
   done: boolean;
 };
 
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
 export default function Home() {
   const [character, setCharacter] = useState("Мій персонаж");
   const [characterClass, setCharacterClass] = useState("Woosa");
@@ -48,38 +50,7 @@ export default function Home() {
   useEffect(() => {
     async function loadProfile() {
       try {
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/api/profile`
-        );
-
-        if (!response.ok) {
-          throw new Error("Не вдалося завантажити профіль");
-        }
-
-        const profile = await response.json();
-
-        setCharacter(profile.character_name);
-        setCharacterClass(profile.character_class);
-        setAp(profile.ap);
-        setDp(profile.dp);
-        setSilver(String(profile.silver_billions));
-        setGoal(profile.goal);
-        setApiStatus("Дані завантажено з бази");
-      } catch (error) {
-        console.error(error);
-        setApiStatus("API недоступний — перевір сервер");
-      }
-    }
-
-    loadProfile();
-  }, []);
-
-  useEffect(() => {
-    async function loadProfile() {
-      try {
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/api/profile`
-        );
+        const response = await fetch(`${API}/api/profile`);
 
         if (!response.ok) {
           throw new Error("Не вдалося завантажити профіль");
@@ -120,7 +91,7 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/profile`,
+        `${API}/api/profile`,
         {
           method: "PUT",
           headers: {

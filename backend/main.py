@@ -1,5 +1,5 @@
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 import sqlite3
 
@@ -12,10 +12,17 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "bdo_assistant.db"
 
 
+@contextmanager
 def get_connection():
+    # `with sqlite3.connect()` лише комітить або відкочує транзакцію,
+    # тому з'єднання закриваємо явно.
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
-    return connection
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def initialize_database():
