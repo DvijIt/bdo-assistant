@@ -37,7 +37,7 @@ cd D:\Projects\bdo-spike
 Без профілю трафік не розпізнається. Свіжий профіль NA/EU від мейнтейнерів:
 
 ```powershell
-.venv\Scripts\bdo-toolkit profile fetch https://ychwu.github.io/bdo-toolkit-profiles/channels/na-eu/stable.json --output opcodes.local
+.\.venv\Scripts\bdo-toolkit profile fetch https://ychwu.github.io/bdo-toolkit-profiles/channels/na-eu/stable.json --output opcodes.local
 ```
 
 З'явиться файл `opcodes.local`. Після щотижневого патча профіль може кілька днів відставати — тоді знадобиться ручне калібрування.
@@ -47,7 +47,7 @@ cd D:\Projects\bdo-spike
 Зайди в гру на сервер і запусти:
 
 ```powershell
-.venv\Scripts\bdo-toolkit diagnose-capture
+.\.venv\Scripts\bdo-toolkit diagnose-capture
 ```
 
 Має бути пропозиція `game_port` з портами `8884,8885,8889`. `no_game` або `no_connections` — гра ще не на сервері.
@@ -55,7 +55,7 @@ cd D:\Projects\bdo-spike
 Швидкий тест подій луту:
 
 ```powershell
-.venv\Scripts\bdo-toolkit live --profile opcodes.local
+.\.venv\Scripts\bdo-toolkit live --profile opcodes.local
 ```
 
 Підбери щось або переклади предмет зі складу в інвентар — у терміналі мають з'явитися події. Зупинка — Ctrl+C.
@@ -67,7 +67,7 @@ cd D:\Projects\bdo-spike
 1. Повністю закрий гру.
 2. Запусти скрипт:
    ```powershell
-   .venv\Scripts\python snapshot.py
+   .\.venv\Scripts\python snapshot.py
    ```
 3. Запусти гру, зайди персонажем, дочекайся, поки світ завантажиться, і натисни Enter у терміналі.
 

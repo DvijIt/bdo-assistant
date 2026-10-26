@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect } from "react";
 
 type Task = {
@@ -171,7 +172,7 @@ export default function Home() {
         <div className="nav-item active">◈ <span>Огляд</span></div>
         <div className="nav-item">⚔ <span>Мій персонаж</span></div>
         <div className="nav-item">◇ <span>Спорядження</span></div>
-        <div className="nav-item">◉ <span>Мої ресурси</span></div>
+        <Link href="/inventory" className="nav-item">◉ <span>Мої ресурси</span></Link>
         <div className="nav-item">◎ <span>План прогресу</span></div>
 
         <div className="sidebar-bottom">
@@ -422,7 +423,7 @@ export default function Home() {
 
         <footer>
           <span>BDO COMPANION <span className="gold">/</span> PERSONAL PROJECT</span>
-          <span>Неофіційний фан-проєкт · Не пов'язаний із Pearl Abyss</span>
+          <span>Неофіційний фан-проєкт · Не пов’язаний із Pearl Abyss</span>
         </footer>
       </section>
     </main>

@@ -1,284 +1,322 @@
-
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { ChangeEvent, useEffect, useState } from "react";
 
-type Category = "gear" | "material" | "consumable" | "other";
+type ContainerKind = "inventory" | "currency" | "storage";
 
-type InventoryItem = {
-  id: number;
-  name: string;
-  category: Category;
+type Holding = {
+  item_id: number;
+  name: string | null;
+  grade: number | null;
+  enhancement: number;
   quantity: number;
-  notes: string;
-  created_at: string;
+};
+
+type Container = {
+  id: number;
+  kind: ContainerKind;
+  game_code: number;
+  name: string;
+  character: string | null;
+  observed_at: string;
+  items: Holding[];
+};
+
+type Holdings = {
+  containers: Container[];
+  missing_names: number;
+};
+
+type Snapshot = {
+  id: number;
+  taken_at: string;
+  character: string;
+  storage_status: string | null;
+  stacks: number;
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-const categoryLabels: Record<Category, string> = {
-  gear: "Спорядження",
-  material: "Матеріали",
-  consumable: "Витратні предмети",
-  other: "Інше",
+const SILVER_ITEM_ID = 1;
+
+const kindLabels: Record<ContainerKind, string> = {
+  inventory: "Інвентар",
+  currency: "Валюти",
+  storage: "Склади міст",
 };
 
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API}${path}`, init);
+  if (!response.ok) {
+    let detail = "";
+    try {
+      detail = (await response.json()).detail ?? "";
+    } catch {
+      // Тіло відповіді не JSON — лишаємо загальне повідомлення.
+    }
+    throw new Error(detail || `Помилка API: ${response.status}`);
+  }
+  return response.json();
+}
+
+function loadAll() {
+  return Promise.all([
+    fetchJson<Holdings>("/api/holdings"),
+    fetchJson<Snapshot[]>("/api/snapshots"),
+  ]);
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleString("uk-UA", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
 export default function InventoryPage() {
-  const [items, setItems] = useState<InventoryItem[]>([]);
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState<Category>("material");
-  const [quantity, setQuantity] = useState("1");
-  const [notes, setNotes] = useState("");
+  const [holdings, setHoldings] = useState<Holdings | null>(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const loadItems = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await fetch(`${API}/api/inventory`);
-
-      if (!response.ok) {
-        throw new Error("Не вдалося завантажити інвентар.");
-      }
-
-      const data: InventoryItem[] = await response.json();
-      setItems(data);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Помилка з'єднання з API."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  function applyLoaded([nextHoldings, nextSnapshots]: [Holdings, Snapshot[]]) {
+    setHoldings(nextHoldings);
+    setSnapshots(nextSnapshots);
+  }
 
   useEffect(() => {
-    void loadItems();
-  }, [loadItems]);
+    let cancelled = false;
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+    loadAll()
+      .then((data) => {
+        if (!cancelled) applyLoaded(data);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(`${err.message}. Перевір, що API запущено.`);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setBusy(true);
     setError("");
     setMessage("");
 
-    const cleanName = name.trim();
-    const parsedQuantity = Number(quantity);
-
-    if (!cleanName) {
-      setError("Вкажи назву предмета.");
-      return;
-    }
-
-    if (
-      !Number.isInteger(parsedQuantity) ||
-      parsedQuantity < 1 ||
-      parsedQuantity > 2_000_000_000
-    ) {
-      setError("Кількість має бути цілим числом від 1 до 2 000 000 000.");
-      return;
-    }
-
-    setSaving(true);
-
     try {
-      const response = await fetch(`${API}/api/inventory`, {
+      let data: unknown;
+      try {
+        data = JSON.parse(await file.text());
+      } catch {
+        throw new Error("Файл не є коректним JSON.");
+      }
+
+      const summary = await fetchJson<{
+        inventory_stacks: number;
+        storage_stacks: number;
+        missing_names: number;
+      }>("/api/snapshots", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: cleanName,
-          category,
-          quantity: parsedQuantity,
-          notes: notes.trim(),
-        }),
+        body: JSON.stringify(data),
       });
 
-      if (!response.ok) {
-        throw new Error(await response.text() || "Не вдалося додати предмет.");
-      }
-
-      const created: InventoryItem = await response.json();
-      setItems((current) => [created, ...current]);
-      setName("");
-      setQuantity("1");
-      setNotes("");
-      setMessage("Предмет збережено в SQLite.");
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Помилка збереження предмета."
+      applyLoaded(await loadAll());
+      setMessage(
+        `Знімок імпортовано: ${summary.inventory_stacks} стеків в інвентарі, ` +
+          `${summary.storage_stacks} на складах.` +
+          (summary.missing_names
+            ? ` Без назви лишилось ${summary.missing_names} предметів.`
+            : "")
       );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не вдалося імпортувати знімок.");
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
-  async function handleDelete(item: InventoryItem) {
-    if (!window.confirm(`Видалити «${item.name}» з інвентаря?`)) {
-      return;
-    }
-
+  async function refreshNames() {
+    setBusy(true);
     setError("");
-    setMessage("");
 
     try {
-      const response = await fetch(`${API}/api/inventory/${item.id}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        throw new Error("Не вдалося видалити предмет.");
-      }
-
-      setItems((current) => current.filter((entry) => entry.id !== item.id));
-      setMessage(`«${item.name}» видалено.`);
+      await fetchJson("/api/items/refresh", { method: "POST" });
+      applyLoaded(await loadAll());
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Помилка видалення предмета."
-      );
+      setError(err instanceof Error ? err.message : "Не вдалося оновити назви.");
+    } finally {
+      setBusy(false);
     }
   }
 
-  const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
+  const containers = holdings?.containers ?? [];
+  const stacks = containers
+    .filter((container) => container.kind !== "currency")
+    .reduce((sum, container) => sum + container.items.length, 0);
+  const storagesWithItems = containers.filter(
+    (container) => container.kind === "storage" && container.items.length > 0
+  ).length;
+  const silver = containers
+    .filter((container) => container.kind === "currency")
+    .flatMap((container) => container.items)
+    .find((holding) => holding.item_id === SILVER_ITEM_ID)?.quantity;
 
   return (
     <main className="inventory-page">
       <header className="inventory-header">
-        <a href="/" className="inventory-back">← Головна панель</a>
+        <Link href="/" className="inventory-back">← Головна панель</Link>
         <div className="eyebrow">BLACK DESERT ONLINE / EU</div>
         <h1>Мій інвентар<span className="gold">.</span></h1>
         <p className="inventory-subtitle">
-          Зберігай предмети та ресурси, щоб надалі планувати розвиток персонажа.
+          Предмети зі знімків bdo-toolkit: для кожного складу й вкладки
+          показано останній стан, який бачив знімок.
         </p>
       </header>
 
       <section className="inventory-summary">
         <div>
-          <span className="muted-label">ЗАПИСІВ У БАЗІ</span>
-          <strong>{items.length}</strong>
+          <span className="muted-label">СТЕКІВ ПРЕДМЕТІВ</span>
+          <strong>{stacks.toLocaleString("uk-UA")}</strong>
         </div>
         <div>
-          <span className="muted-label">ЗАГАЛЬНА КІЛЬКІСТЬ</span>
-          <strong>{totalUnits.toLocaleString("uk-UA")}</strong>
+          <span className="muted-label">СКЛАДІВ З ПРЕДМЕТАМИ</span>
+          <strong>{storagesWithItems}</strong>
         </div>
         <div>
-          <span className="muted-label">СХОВИЩЕ ДАНИХ</span>
-          <strong>SQLite</strong>
+          <span className="muted-label">СРІБЛО В ІНВЕНТАРІ</span>
+          <strong>{silver === undefined ? "—" : silver.toLocaleString("uk-UA")}</strong>
         </div>
       </section>
 
       <div className="inventory-layout">
         <section className="panel">
-          <div className="eyebrow">NEW ITEM</div>
-          <h2>Додати предмет</h2>
+          <div className="eyebrow">IMPORT</div>
+          <h2>Імпорт знімка</h2>
           <p className="inventory-muted">
-            Внось предмети вручну. Назви поки не перевіряються за каталогом гри.
+            Вибери JSON з папки snapshots після запуску snapshot.py. Склади
+            приходять лише з першого входу після запуску гри, інвентар — з
+            будь-якого входу чи зміни персонажа.
           </p>
 
-          <form className="inventory-form" onSubmit={handleSubmit}>
-            <label htmlFor="item-name">Назва предмета</label>
+          <div className="inventory-form">
+            <label htmlFor="snapshot-file">Файл знімка (.json)</label>
             <input
-              id="item-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              maxLength={150}
-              placeholder="Наприклад, Black Stone"
-              required
+              id="snapshot-file"
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) => void handleFile(event)}
+              disabled={busy}
             />
-
-            <label htmlFor="item-category">Категорія</label>
-            <select
-              id="item-category"
-              value={category}
-              onChange={(event) => setCategory(event.target.value as Category)}
-            >
-              <option value="gear">Спорядження</option>
-              <option value="material">Матеріали</option>
-              <option value="consumable">Витратні предмети</option>
-              <option value="other">Інше</option>
-            </select>
-
-            <label htmlFor="item-quantity">Кількість</label>
-            <input
-              id="item-quantity"
-              type="number"
-              min="1"
-              max="2000000000"
-              step="1"
-              value={quantity}
-              onChange={(event) => setQuantity(event.target.value)}
-              required
-            />
-
-            <label htmlFor="item-notes">Нотатки (необов'язково)</label>
-            <textarea
-              id="item-notes"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              maxLength={500}
-              rows={3}
-              placeholder="Рівень посилення, місце зберігання..."
-            />
-
-            <button className="primary-button" type="submit" disabled={saving}>
-              {saving ? "Збереження..." : "+ Зберегти предмет"}
-            </button>
-          </form>
-        </section>
-
-        <section className="panel">
-          <div className="inventory-list-heading">
-            <div>
-              <div className="eyebrow">YOUR COLLECTION</div>
-              <h2>Збережені предмети</h2>
-            </div>
-            <button
-              className="outline-button"
-              type="button"
-              onClick={() => void loadItems()}
-              disabled={loading}
-            >
-              ↻ Оновити
-            </button>
           </div>
 
           {error && <p className="inventory-feedback error">{error}</p>}
           {message && <p className="inventory-feedback">{message}</p>}
 
+          {holdings && holdings.missing_names > 0 && (
+            <button
+              className="outline-button snapshot-refresh"
+              type="button"
+              onClick={() => void refreshNames()}
+              disabled={busy}
+            >
+              ↻ Дотягнути назви ({holdings.missing_names})
+            </button>
+          )}
+
+          <div className="eyebrow snapshot-list-title">ЗНІМКИ</div>
+          {snapshots.length === 0 ? (
+            <p className="inventory-muted">Ще нічого не імпортовано.</p>
+          ) : (
+            <ul className="snapshot-list">
+              {snapshots.map((snapshot) => (
+                <li key={snapshot.id}>
+                  <strong>{formatDate(snapshot.taken_at)}</strong>
+                  <span>
+                    {snapshot.character} · {snapshot.stacks} записів
+                    {snapshot.storage_status === "compatible" && " · склади"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="inventory-list-heading">
+            <div>
+              <div className="eyebrow">YOUR ACCOUNT</div>
+              <h2>Поточний стан</h2>
+            </div>
+          </div>
+
           {loading ? (
-            <p className="inventory-muted">Завантаження інвентаря...</p>
-          ) : items.length === 0 ? (
+            <p className="inventory-muted">Завантаження...</p>
+          ) : containers.length === 0 ? (
             <div className="inventory-empty">
               <span>◇</span>
-              <strong>Інвентар поки порожній</strong>
-              <p>Додай перший предмет у формі ліворуч.</p>
+              <strong>Даних ще немає</strong>
+              <p>Імпортуй перший знімок у панелі ліворуч.</p>
             </div>
           ) : (
-            <div className="inventory-items">
-              {items.map((item) => (
-                <article className="inventory-item" key={item.id}>
-                  <div className="inventory-item-icon">◇</div>
-                  <div className="inventory-item-copy">
-                    <strong>{item.name}</strong>
-                    <span>{categoryLabels[item.category]}</span>
-                    {item.notes && <p>{item.notes}</p>}
-                  </div>
-                  <div className="inventory-item-actions">
-                    <strong>×{item.quantity.toLocaleString("uk-UA")}</strong>
-                    <button
-                      className="delete-button"
-                      type="button"
-                      onClick={() => void handleDelete(item)}
-                      aria-label={`Видалити ${item.name}`}
-                    >
-                      Видалити
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
+            (["inventory", "currency", "storage"] as const).map((kind) => {
+              const group = containers.filter((container) => container.kind === kind);
+              if (group.length === 0) return null;
+
+              return (
+                <div className="holdings-kind" key={kind}>
+                  <div className="eyebrow">{kindLabels[kind].toUpperCase()}</div>
+                  {group.map((container) => (
+                    <details className="holdings-group" key={container.id}>
+                      <summary>
+                        <strong>{container.name}</strong>
+                        <span>
+                          {container.items.length} · {formatDate(container.observed_at)}
+                        </span>
+                      </summary>
+
+                      {container.items.length === 0 ? (
+                        <p className="inventory-muted">Порожньо.</p>
+                      ) : (
+                        <div className="inventory-items">
+                          {container.items.map((holding, index) => (
+                            <article
+                              className="inventory-item"
+                              key={`${holding.item_id}-${holding.enhancement}-${index}`}
+                            >
+                              <div
+                                className={`inventory-item-icon ${holding.enhancement > 0 ? "enhanced" : ""}`}
+                              >
+                                {holding.enhancement > 0 ? `+${holding.enhancement}` : "◇"}
+                              </div>
+                              <div className="inventory-item-copy">
+                                <strong>{holding.name ?? `Предмет #${holding.item_id}`}</strong>
+                                <span>ID {holding.item_id}</span>
+                              </div>
+                              <div className="inventory-item-actions">
+                                <strong>×{holding.quantity.toLocaleString("uk-UA")}</strong>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </details>
+                  ))}
+                </div>
+              );
+            })
           )}
         </section>
       </div>

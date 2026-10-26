@@ -3,9 +3,12 @@ from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 import sqlite3
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+import arsha
+import snapshots
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -44,18 +47,7 @@ def initialize_database():
             VALUES (1)
         """)
 
-        
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS inventory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'material',
-                quantity INTEGER NOT NULL DEFAULT 1,
-                notes TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
+        snapshots.initialize_schema(connection)
 
 
 @asynccontextmanager
@@ -72,9 +64,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    # Dev-сервер Next може стартувати не на 3000, якщо порт зайнятий.
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=False,
-    allow_methods=["GET", "PUT", "POST", "DELETE"],
+    allow_methods=["GET", "PUT", "POST"],
     allow_headers=["Content-Type"],
 )
 
@@ -86,17 +79,6 @@ class ProfileUpdate(BaseModel):
     dp: int = Field(ge=0, le=10000)
     silver_billions: float = Field(ge=0, le=1_000_000_000)
     goal: str = Field(pattern=r"^(gear|silver|pve|life)$")
-
-    
-class InventoryItemCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=150)
-    category: str = Field(
-        default="material",
-        pattern=r"^(gear|material|consumable|other)$"
-    )
-    quantity: int = Field(default=1, ge=1, le=2_000_000_000)
-    notes: str = Field(default="", max_length=500)
-
 
 
 def profile_to_dict(row):
@@ -159,67 +141,59 @@ def update_profile(profile: ProfileUpdate):
     return profile_to_dict(row)
 
 
-def inventory_item_to_dict(row):
-    return {
-        "id": row["id"],
-        "name": row["name"],
-        "category": row["category"],
-        "quantity": row["quantity"],
-        "notes": row["notes"],
-        "created_at": row["created_at"],
-    }
+def refresh_item_names(connection):
+    """Дотягує з arsha.io назви предметів, яких ще немає в кеші.
+
+    Повертає кількість предметів, що лишилися без назви.
+    """
+    missing = snapshots.missing_item_ids(connection)
+    if missing:
+        try:
+            snapshots.save_items(connection, arsha.fetch_items(missing))
+        except (OSError, ValueError):
+            # arsha.io неофіційний і може не відповісти; назви дотягнемо пізніше.
+            pass
+    return len(snapshots.missing_item_ids(connection))
 
 
-@app.get("/api/inventory")
-def get_inventory():
+@app.get("/api/snapshots")
+def get_snapshots():
     with get_connection() as connection:
-        rows = connection.execute(
-            "SELECT * FROM inventory ORDER BY id DESC"
-        ).fetchall()
-
-    return [inventory_item_to_dict(row) for row in rows]
+        return snapshots.list_snapshots(connection)
 
 
-@app.post("/api/inventory", status_code=201)
-def add_inventory_item(item: InventoryItemCreate):
-    name = item.name.strip()
-
-    if not name:
-        raise HTTPException(
-            status_code=422,
-            detail="Назва предмета не може бути порожньою"
-        )
-
+@app.post("/api/snapshots", status_code=201)
+def import_snapshot(data: dict = Body(...), character: str | None = None):
     with get_connection() as connection:
-        cursor = connection.execute(
-            """
-            INSERT INTO inventory (name, category, quantity, notes)
-            VALUES (?, ?, ?, ?)
-            """,
-            (name, item.category, item.quantity, item.notes.strip()),
-        )
+        if not character:
+            character = connection.execute(
+                "SELECT character_name FROM profile WHERE id = 1"
+            ).fetchone()[0]
 
-        row = connection.execute(
-            "SELECT * FROM inventory WHERE id = ?",
-            (cursor.lastrowid,),
-        ).fetchone()
+        try:
+            summary = snapshots.import_snapshot(connection, data, character)
+        except snapshots.DuplicateSnapshotError as error:
+            raise HTTPException(status_code=409, detail=str(error))
+        except snapshots.SnapshotError as error:
+            raise HTTPException(status_code=422, detail=str(error))
 
-    return inventory_item_to_dict(row)
-
-
-@app.delete("/api/inventory/{item_id}")
-def delete_inventory_item(item_id: int):
+    # Імпорт уже закомічено: недоступний arsha.io не має його відкотити.
     with get_connection() as connection:
-        cursor = connection.execute(
-            "DELETE FROM inventory WHERE id = ?",
-            (item_id,),
-        )
+        summary["missing_names"] = refresh_item_names(connection)
 
-        if cursor.rowcount == 0:
-            raise HTTPException(
-                status_code=404,
-                detail="Предмет не знайдено"
-            )
+    return summary
 
-    return {"deleted": True, "id": item_id}
 
+@app.get("/api/holdings")
+def get_holdings():
+    with get_connection() as connection:
+        return {
+            "containers": snapshots.current_holdings(connection),
+            "missing_names": len(snapshots.missing_item_ids(connection)),
+        }
+
+
+@app.post("/api/items/refresh")
+def refresh_items():
+    with get_connection() as connection:
+        return {"missing_names": refresh_item_names(connection)}
