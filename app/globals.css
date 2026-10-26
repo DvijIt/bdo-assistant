@@ -968,6 +968,25 @@ a.nav-item {
   font: 700 13px "Manrope", Arial, sans-serif;
 }
 
+.price-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.price-status .outline-button {
+  white-space: nowrap;
+}
+
+.item-value {
+  color: var(--gold);
+  font-size: 11px;
+}
+
 .snapshot-refresh {
   margin-top: 14px;
 }

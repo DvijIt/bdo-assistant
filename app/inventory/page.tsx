@@ -11,6 +11,8 @@ type Holding = {
   grade: number | null;
   enhancement: number;
   quantity: number;
+  unit_price: number | null;
+  value: number | null;
 };
 
 type Container = {
@@ -28,6 +30,36 @@ type Holdings = {
   missing_names: number;
 };
 
+type ValuedItem = {
+  item_id: number;
+  name: string | null;
+  enhancement: number;
+  quantity: number;
+  container: string;
+  value: number;
+};
+
+type Duplicate = {
+  item_id: number;
+  name: string | null;
+  enhancement: number;
+  quantity: number;
+  value: number | null;
+  places: { container: string; quantity: number }[];
+};
+
+type Account = {
+  total_value: number;
+  items_value: number;
+  silver: number;
+  priced_stacks: number;
+  unpriced_stacks: number;
+  prices_fetched_at: string | null;
+  by_container: { id: number; value: number }[];
+  top_items: ValuedItem[];
+  duplicates: Duplicate[];
+};
+
 type Snapshot = {
   id: number;
   taken_at: string;
@@ -37,8 +69,6 @@ type Snapshot = {
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-const SILVER_ITEM_ID = 1;
 
 const kindLabels: Record<ContainerKind, string> = {
   inventory: "Інвентар",
@@ -64,7 +94,20 @@ function loadAll() {
   return Promise.all([
     fetchJson<Holdings>("/api/holdings"),
     fetchJson<Snapshot[]>("/api/snapshots"),
+    fetchJson<Account>("/api/account"),
   ]);
+}
+
+// Срібло в BDO рахують мільйонами й мільярдами.
+function formatSilver(value: number) {
+  if (value >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
+  if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  return value.toLocaleString("uk-UA");
+}
+
+function itemLabel(item: { name: string | null; item_id: number; enhancement: number }) {
+  const name = item.name ?? `Предмет #${item.item_id}`;
+  return item.enhancement > 0 ? `+${item.enhancement} ${name}` : name;
 }
 
 function formatDate(value: string) {
@@ -77,14 +120,16 @@ function formatDate(value: string) {
 export default function InventoryPage() {
   const [holdings, setHoldings] = useState<Holdings | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [account, setAccount] = useState<Account | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  function applyLoaded([nextHoldings, nextSnapshots]: [Holdings, Snapshot[]]) {
+  function applyLoaded([nextHoldings, nextSnapshots, nextAccount]: [Holdings, Snapshot[], Account]) {
     setHoldings(nextHoldings);
     setSnapshots(nextSnapshots);
+    setAccount(nextAccount);
   }
 
   useEffect(() => {
@@ -162,17 +207,29 @@ export default function InventoryPage() {
     }
   }
 
+  async function refreshPrices() {
+    setBusy(true);
+    setError("");
+    setMessage("Оновлюю ціни з ринку. Перший раз це може тривати до хвилини...");
+
+    try {
+      const result = await fetchJson<{ requested: number }>("/api/prices/refresh", {
+        method: "POST",
+      });
+      applyLoaded(await loadAll());
+      setMessage(`Ціни оновлено для ${result.requested} предметів.`);
+    } catch (err) {
+      setMessage("");
+      setError(err instanceof Error ? err.message : "Не вдалося оновити ціни.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const containers = holdings?.containers ?? [];
-  const stacks = containers
-    .filter((container) => container.kind !== "currency")
-    .reduce((sum, container) => sum + container.items.length, 0);
-  const storagesWithItems = containers.filter(
-    (container) => container.kind === "storage" && container.items.length > 0
-  ).length;
-  const silver = containers
-    .filter((container) => container.kind === "currency")
-    .flatMap((container) => container.items)
-    .find((holding) => holding.item_id === SILVER_ITEM_ID)?.quantity;
+  const containerValues = new Map(
+    (account?.by_container ?? []).map((container) => [container.id, container.value])
+  );
 
   return (
     <main className="inventory-page">
@@ -182,24 +239,44 @@ export default function InventoryPage() {
         <h1>Мій інвентар<span className="gold">.</span></h1>
         <p className="inventory-subtitle">
           Предмети зі знімків bdo-toolkit: для кожного складу й вкладки
-          показано останній стан, який бачив знімок.
+          показано останній стан, який бачив знімок. Вартість — за базовою
+          ціною Central Market EU (arsha.io), до вирахування податку.
         </p>
       </header>
 
       <section className="inventory-summary">
         <div>
-          <span className="muted-label">СТЕКІВ ПРЕДМЕТІВ</span>
-          <strong>{stacks.toLocaleString("uk-UA")}</strong>
+          <span className="muted-label">ВАРТІСТЬ АКАУНТА</span>
+          <strong>{account?.prices_fetched_at ? formatSilver(account.total_value) : "—"}</strong>
         </div>
         <div>
-          <span className="muted-label">СКЛАДІВ З ПРЕДМЕТАМИ</span>
-          <strong>{storagesWithItems}</strong>
+          <span className="muted-label">ПРЕДМЕТИ ЗА РИНКОМ</span>
+          <strong>{account?.prices_fetched_at ? formatSilver(account.items_value) : "—"}</strong>
         </div>
         <div>
           <span className="muted-label">СРІБЛО В ІНВЕНТАРІ</span>
-          <strong>{silver === undefined ? "—" : silver.toLocaleString("uk-UA")}</strong>
+          <strong>{account ? formatSilver(account.silver) : "—"}</strong>
         </div>
       </section>
+
+      {account && containers.length > 0 && (
+        <div className="price-status">
+          <span>
+            {account.prices_fetched_at
+              ? `Ціни: ${formatDate(account.prices_fetched_at)} · з ціною ${account.priced_stacks} стеків, ` +
+                `без ціни ${account.unpriced_stacks} (поза ринком або прив’язані)`
+              : "Ціни ще не завантажені."}
+          </span>
+          <button
+            className="outline-button"
+            type="button"
+            onClick={() => void refreshPrices()}
+            disabled={busy}
+          >
+            ↻ Оновити ціни
+          </button>
+        </div>
+      )}
 
       <div className="inventory-layout">
         <section className="panel">
@@ -252,6 +329,41 @@ export default function InventoryPage() {
               ))}
             </ul>
           )}
+
+          {account && account.top_items.length > 0 && (
+            <>
+              <div className="eyebrow snapshot-list-title">НАЙДОРОЖЧІ ПРЕДМЕТИ</div>
+              <ul className="snapshot-list">
+                {account.top_items.map((top, index) => (
+                  <li key={`${top.item_id}-${top.enhancement}-${index}`}>
+                    <strong>{itemLabel(top)} — {formatSilver(top.value)}</strong>
+                    <span>{top.container} · ×{top.quantity.toLocaleString("uk-UA")}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {account && account.duplicates.length > 0 && (
+            <>
+              <div className="eyebrow snapshot-list-title">ДУБЛІКАТИ МІЖ СКЛАДАМИ</div>
+              <ul className="snapshot-list">
+                {account.duplicates.map((duplicate) => (
+                  <li key={`${duplicate.item_id}-${duplicate.enhancement}`}>
+                    <strong>
+                      {itemLabel(duplicate)} — ×{duplicate.quantity.toLocaleString("uk-UA")}
+                      {duplicate.value !== null && `, ${formatSilver(duplicate.value)}`}
+                    </strong>
+                    <span>
+                      {duplicate.places
+                        .map((place) => `${place.container} ×${place.quantity.toLocaleString("uk-UA")}`)
+                        .join(" · ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </section>
 
         <section className="panel">
@@ -283,7 +395,11 @@ export default function InventoryPage() {
                       <summary>
                         <strong>{container.name}</strong>
                         <span>
-                          {container.items.length} · {formatDate(container.observed_at)}
+                          {container.items.length} ·{" "}
+                          {containerValues.get(container.id)
+                            ? `${formatSilver(containerValues.get(container.id)!)} · `
+                            : ""}
+                          {formatDate(container.observed_at)}
                         </span>
                       </summary>
 
@@ -307,6 +423,9 @@ export default function InventoryPage() {
                               </div>
                               <div className="inventory-item-actions">
                                 <strong>×{holding.quantity.toLocaleString("uk-UA")}</strong>
+                                {holding.value !== null && (
+                                  <span className="item-value">{formatSilver(holding.value)}</span>
+                                )}
                               </div>
                             </article>
                           ))}

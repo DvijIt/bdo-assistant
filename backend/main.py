@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 import arsha
 import snapshots
+import valuation
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -48,6 +49,7 @@ def initialize_database():
         """)
 
         snapshots.initialize_schema(connection)
+        valuation.initialize_schema(connection)
 
 
 @asynccontextmanager
@@ -187,9 +189,42 @@ def import_snapshot(data: dict = Body(...), character: str | None = None):
 @app.get("/api/holdings")
 def get_holdings():
     with get_connection() as connection:
+        containers = snapshots.current_holdings(connection)
+        prices = valuation.unit_prices(connection)
+        for container in containers:
+            for holding in container["items"]:
+                price = prices.get((holding["item_id"], holding["enhancement"]))
+                holding["unit_price"] = price
+                holding["value"] = None if price is None else price * holding["quantity"]
+
         return {
-            "containers": snapshots.current_holdings(connection),
+            "containers": containers,
             "missing_names": len(snapshots.missing_item_ids(connection)),
+        }
+
+
+@app.get("/api/account")
+def get_account():
+    with get_connection() as connection:
+        return valuation.account_value(connection)
+
+
+@app.post("/api/prices/refresh")
+def refresh_prices(full: bool = False):
+    # full=true перепитує й предмети, які раніше були поза ринком.
+    with get_connection() as connection:
+        item_ids = valuation.item_ids_to_price(connection, include_off_market=full)
+
+    try:
+        entries = arsha.fetch_market(item_ids)
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=502, detail=f"arsha.io недоступний: {error}")
+
+    with get_connection() as connection:
+        valuation.save_prices(connection, item_ids, entries)
+        return {
+            "requested": len(item_ids),
+            "prices_fetched_at": valuation.prices_fetched_at(connection),
         }
 
 
