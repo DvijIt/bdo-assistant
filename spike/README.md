@@ -4,30 +4,30 @@
 
 bdo-toolkit — бібліотека, а не фоновий агент: сам він нічого не захоплює і не зберігає. Знімок з'являється лише тоді, коли сесію захоплення запущено **до** входу персонажем.
 
-Усе нижче — у **PowerShell** (Пуск → «PowerShell», права адміністратора не потрібні), з папки спайку `C:\dev\bdo-spike`, окремо від репозиторію.
+Усе нижче — у **PowerShell** (Пуск → «PowerShell», права адміністратора не потрібні), з папки спайку `D:\Projects\bdo-spike`, окремо від репозиторію.
 
 ## 0. Підготовка (один раз)
 
 Потрібні Python 3.14 і Npcap (без галочки «Restrict Npcap driver's access to Administrators only»).
 
 ```powershell
-py -3.14 -m venv C:\dev\bdo-spike\.venv
+py -3.14 -m venv D:\Projects\bdo-spike\.venv
 ```
 
 ```powershell
-C:\dev\bdo-spike\.venv\Scripts\pip install bdo-toolkit==1.0.15
+D:\Projects\bdo-spike\.venv\Scripts\pip install bdo-toolkit==1.0.15
 ```
 
 Скопіюй скрипт знімка з репозиторію в папку спайку:
 
 ```powershell
-copy C:\dev\bdo-assistant\spike\snapshot.py C:\dev\bdo-spike\
+copy D:\Projects\bdo-assistant\spike\snapshot.py D:\Projects\bdo-spike\
 ```
 
 Перейди в папку спайку — усі наступні команди виконуються звідси:
 
 ```powershell
-cd C:\dev\bdo-spike
+cd D:\Projects\bdo-spike
 ```
 
 `dir` має показати `.venv` і `snapshot.py`.
@@ -71,7 +71,7 @@ cd C:\dev\bdo-spike
    ```
 3. Запусти гру, зайди персонажем, дочекайся, поки світ завантажиться, і натисни Enter у терміналі.
 
-Знімок збережеться в `C:\dev\bdo-spike\snapshots\<дата-час>.json`.
+Знімок збережеться в `D:\Projects\bdo-spike\snapshots\<дата-час>.json`.
 
 ## 4. Як зрозуміти, що вдалося
 

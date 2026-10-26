@@ -5,7 +5,7 @@ from pathlib import Path
 
 from bdo_toolkit.item_state import CharacterLoadSession, format_item_state
 
-# Профіль і знімки лежать поруч зі скриптом (C:\dev\bdo-spike).
+# Профіль і знімки лежать поруч зі скриптом (D:\Projects\bdo-spike).
 HERE = Path(__file__).resolve().parent
 PROFILE = HERE / "opcodes.local"
 OUT = HERE / "snapshots"
