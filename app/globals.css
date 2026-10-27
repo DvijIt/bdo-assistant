@@ -1096,3 +1096,257 @@ a.nav-item {
   }
 }
 
+
+/* Сторінки акаунта: персонажі, робітники, транспорт */
+
+.account-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 20px;
+}
+
+.account-nav a {
+  padding: 8px 13px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: #a5abb5;
+  font-size: 12px;
+}
+
+.account-nav a.active {
+  color: var(--gold-light);
+  background: #242017;
+  border-color: #393022;
+}
+
+.agent-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 24px 0 18px;
+  padding: 14px 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.agent-bar .connection-dot {
+  flex: none;
+  background: var(--muted);
+  box-shadow: none;
+}
+
+.agent-bar.running .connection-dot {
+  background: #6fbf73;
+  box-shadow: 0 0 10px #6fbf7366;
+}
+
+.agent-bar.starting .connection-dot {
+  background: var(--gold);
+}
+
+.agent-bar.error .connection-dot {
+  background: #d9665b;
+}
+
+.agent-bar-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.agent-bar-copy strong {
+  font-size: 13px;
+}
+
+.agent-bar-copy span {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.agent-bar.error .agent-bar-copy span {
+  color: #e58a80;
+}
+
+.account-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.account-card h2 {
+  margin: 6px 0 14px;
+  font-size: 22px;
+}
+
+.account-card-level {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.account-card-level strong {
+  color: var(--gold-light);
+  font-size: 18px;
+}
+
+.account-card-level span,
+.account-seen {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.account-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.account-facts div {
+  padding: 9px 10px;
+  background: var(--panel-2);
+  border-radius: 7px;
+}
+
+.account-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.account-facts dd {
+  margin: 3px 0 0;
+  font-size: 15px;
+}
+
+.account-seen {
+  margin: 14px 0 0;
+}
+
+.account-group + .account-group {
+  margin-top: 14px;
+}
+
+.account-group > .eyebrow {
+  margin-bottom: 14px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.account-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.account-table th {
+  padding: 0 10px 10px 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.account-table td {
+  padding: 11px 10px 11px 0;
+  border-top: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.warn {
+  color: #e58a80;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip-list li {
+  padding: 3px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: #c5cad2;
+  font-size: 11px;
+}
+
+.account-servant {
+  padding: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.account-servant-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.account-servant-head span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.account-gear {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-gear li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.account-gear li div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-gear li div span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.account-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .agent-bar {
+    flex-wrap: wrap;
+  }
+
+  .price-status {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

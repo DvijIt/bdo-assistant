@@ -170,9 +170,11 @@ export default function Home() {
 
         <div className="nav-label">WORKSPACE</div>
         <div className="nav-item active">◈ <span>Огляд</span></div>
-        <div className="nav-item">⚔ <span>Мій персонаж</span></div>
+        <Link href="/characters" className="nav-item">⚔ <span>Мої персонажі</span></Link>
         <div className="nav-item">◇ <span>Спорядження</span></div>
         <Link href="/inventory" className="nav-item">◉ <span>Мої ресурси</span></Link>
+        <Link href="/workers" className="nav-item">⚒ <span>Робітники</span></Link>
+        <Link href="/transport" className="nav-item">⚓ <span>Транспорт</span></Link>
         <div className="nav-item">◎ <span>План прогресу</span></div>
 
         <div className="sidebar-bottom">
