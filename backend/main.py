@@ -271,6 +271,12 @@ def get_characters():
         return account.list_characters(connection)
 
 
+@app.get("/api/family")
+def get_family():
+    with get_connection() as connection:
+        return account.family_summary(connection)
+
+
 @app.get("/api/workers")
 def get_workers():
     with get_connection() as connection:

@@ -15,13 +15,21 @@ SCHEMA = """
         family TEXT,
         class_id INTEGER,
         class_name TEXT,
+        slot INTEGER,                  -- місце на екрані вибору персонажа, з 0
         level INTEGER,
         xp INTEGER,
         xp_to_next INTEGER,
-        fame_combat INTEGER,
-        fame_life INTEGER,
-        fame_third INTEGER,
         last_seen REAL NOT NULL
+    );
+
+    -- Слава спільна для сім'ї, хоч і приходить разом із даними персонажа.
+    CREATE TABLE IF NOT EXISTS family (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        name TEXT,
+        fame_combat INTEGER NOT NULL,
+        fame_life INTEGER NOT NULL,
+        fame_third INTEGER NOT NULL,
+        updated_at REAL NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS workers (
@@ -88,6 +96,31 @@ INDESTRUCTIBLE = 32767
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(SCHEMA)
+    try:
+        connection.execute("ALTER TABLE characters ADD COLUMN slot INTEGER")
+    except sqlite3.OperationalError:  # колонка вже є
+        pass
+    # Раніше клас читався як u32 разом зі слотом у старших байтах.
+    connection.execute(
+        """
+        UPDATE characters SET
+            class_name = CASE WHEN class_id > 65535 THEN NULL ELSE class_name END,
+            slot = class_id >> 16, class_id = class_id & 65535
+        WHERE class_id > 65535 OR (slot IS NULL AND class_id IS NOT NULL)
+        """
+    )
+    # Старі бази тримали славу в characters; переносимо найсвіжішу в family.
+    try:
+        connection.execute(
+            """
+            INSERT INTO family (id, name, fame_combat, fame_life, fame_third, updated_at)
+            SELECT 1, family, fame_combat, fame_life, fame_third, last_seen FROM characters
+            WHERE fame_combat IS NOT NULL AND NOT EXISTS (SELECT 1 FROM family)
+            ORDER BY last_seen DESC LIMIT 1
+            """
+        )
+    except sqlite3.OperationalError:  # нова база без колонок слави в characters
+        pass
 
 
 class AccountWriter:
@@ -110,17 +143,24 @@ class AccountWriter:
         self.current_character_id = r.character_id
         connection.execute(
             """
-            INSERT INTO characters (character_id, nick, family, class_id, class_name,
-                                    fame_combat, fame_life, fame_third, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO characters (character_id, nick, family, class_id, class_name, slot, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (character_id) DO UPDATE SET
                 nick = excluded.nick, family = excluded.family,
                 class_id = excluded.class_id, class_name = excluded.class_name,
-                fame_combat = excluded.fame_combat, fame_life = excluded.fame_life,
-                fame_third = excluded.fame_third, last_seen = excluded.last_seen
+                slot = excluded.slot, last_seen = excluded.last_seen
             """,
-            (r.character_id, r.nick, r.family, r.class_id, r.class_name,
-             r.fame_combat, r.fame_life, r.fame_third, r.observed_at),
+            (r.character_id, r.nick, r.family, r.class_id, r.class_name, r.slot, r.observed_at),
+        )
+        connection.execute(
+            """
+            INSERT INTO family (id, name, fame_combat, fame_life, fame_third, updated_at)
+            VALUES (1, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                name = excluded.name, fame_combat = excluded.fame_combat, fame_life = excluded.fame_life,
+                fame_third = excluded.fame_third, updated_at = excluded.updated_at
+            """,
+            (r.family, r.fame_combat, r.fame_life, r.fame_third, r.observed_at),
         )
 
     def _character_summary(self, connection: sqlite3.Connection, r) -> None:
@@ -213,7 +253,9 @@ def knowledge_summary(connection: sqlite3.Connection) -> dict:
 
 
 def list_characters(connection: sqlite3.Connection) -> list[dict]:
-    rows = connection.execute("SELECT * FROM characters ORDER BY last_seen DESC").fetchall()
+    rows = connection.execute(
+        "SELECT * FROM characters ORDER BY slot IS NULL, slot, last_seen DESC"
+    ).fetchall()
     return [
         {
             "character_id": str(row["character_id"]),  # u64 не влазить у JS number
@@ -221,18 +263,29 @@ def list_characters(connection: sqlite3.Connection) -> list[dict]:
             "family": row["family"],
             "class_id": row["class_id"],
             "class_name": row["class_name"],
+            "slot": row["slot"],
             "level": row["level"],
             "xp": row["xp"],
             "xp_to_next": row["xp_to_next"],
             "xp_percent": (100 * row["xp"] / row["xp_to_next"]) if row["xp"] is not None and row["xp_to_next"] else None,
-            "fame": None if row["fame_combat"] is None else {
-                "combat": row["fame_combat"], "life": row["fame_life"], "third": row["fame_third"],
-                "total": row["fame_combat"] + row["fame_life"] + row["fame_third"],
-            },
             "last_seen": row["last_seen"],
         }
         for row in rows
     ]
+
+
+def family_summary(connection: sqlite3.Connection) -> dict | None:
+    row = connection.execute("SELECT * FROM family WHERE id = 1").fetchone()
+    if row is None:
+        return None
+    return {
+        "name": row["name"],
+        "fame": {
+            "combat": row["fame_combat"], "life": row["fame_life"], "third": row["fame_third"],
+            "total": row["fame_combat"] + row["fame_life"] + row["fame_third"],
+        },
+        "updated_at": row["updated_at"],
+    }
 
 
 def list_workers(connection: sqlite3.Connection) -> list[dict]:

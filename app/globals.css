@@ -1381,3 +1381,14 @@ a.nav-item {
   font-size: 13px;
   font-weight: 600;
 }
+
+.account-facts-wide {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 4px;
+}
+
+@media (max-width: 480px) {
+  .account-facts-wide {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

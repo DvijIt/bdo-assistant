@@ -13,36 +13,64 @@ type Character = {
   xp: number | null;
   xp_to_next: number | null;
   xp_percent: number | null;
-  fame: { combat: number; life: number; third: number; total: number } | null;
   last_seen: number;
 };
 
+type Family = {
+  name: string | null;
+  fame: { combat: number; life: number; third: number; total: number };
+  updated_at: number;
+} | null;
+
 export default function CharactersPage() {
-  const { data, error, reload } = useApiData<Character[]>("/api/characters");
-  const characters = data ?? [];
+  const characters = useApiData<Character[]>("/api/characters");
+  const family = useApiData<Family>("/api/family");
+  const list = characters.data ?? [];
+  const fame = family.data?.fame;
+  const error = characters.error || family.error;
 
   return (
     <AccountPage
       active="/characters/"
       title="Мої персонажі"
-      subtitle="Персонаж з'являється тут після входу ним у світ, поки агент увімкнено: клас, рівень, досвід і слава приходять з трафіку гри."
-      onRecords={reload}
+      subtitle="Персонаж з'являється тут після входу ним у світ, поки агент увімкнено: клас, рівень і досвід приходять з трафіку гри. Слава — спільна для сім'ї."
+      onRecords={() => {
+        characters.reload();
+        family.reload();
+      }}
     >
       {error && <p className="inventory-feedback error">{error}</p>}
 
-      {data === null && !error ? (
+      {fame && (
+        <section className="panel account-group">
+          <div className="inventory-list-heading">
+            <div>
+              <div className="eyebrow">СІМ&apos;Я · ОНОВЛЕНО {formatSeen(family.data!.updated_at)}</div>
+              <h2>{family.data!.name ?? "Сім'я"}</h2>
+            </div>
+          </div>
+          <dl className="account-facts account-facts-wide">
+            <div><dt>Слава</dt><dd>{fame.total.toLocaleString("uk-UA")}</dd></div>
+            <div><dt>Бій</dt><dd>{fame.combat.toLocaleString("uk-UA")}</dd></div>
+            <div><dt>Життя</dt><dd>{fame.life.toLocaleString("uk-UA")}</dd></div>
+            <div><dt>Інша</dt><dd>{fame.third.toLocaleString("uk-UA")}</dd></div>
+          </dl>
+        </section>
+      )}
+
+      {characters.data === null && !error ? (
         <p className="inventory-muted">Завантаження...</p>
-      ) : characters.length === 0 ? (
+      ) : list.length === 0 ? (
         <div className="inventory-empty panel">
           <span>◇</span>
           <strong>Персонажів ще немає</strong>
           <p>Увімкни агента й зайди персонажем у світ.</p>
         </div>
       ) : (
-        <section className="account-cards">
-          {characters.map((character) => (
+        <section className="account-cards account-group">
+          {list.map((character) => (
             <article className="panel account-card" key={character.character_id}>
-              <div className="eyebrow">{character.family ? `${character.family.toUpperCase()} · ` : ""}{character.class_name ?? "КЛАС НЕВІДОМИЙ"}</div>
+              <div className="eyebrow">{character.class_name ?? "КЛАС НЕВІДОМИЙ"}</div>
               <h2>{character.nick}</h2>
               <div className="account-card-level">
                 <strong>Lv. {character.level ?? "—"}</strong>
@@ -57,14 +85,6 @@ export default function CharactersPage() {
                 <p className="inventory-muted">
                   XP {character.xp.toLocaleString("uk-UA")} / {character.xp_to_next.toLocaleString("uk-UA")}
                 </p>
-              )}
-              {character.fame && (
-                <dl className="account-facts">
-                  <div><dt>Слава</dt><dd>{character.fame.total.toLocaleString("uk-UA")}</dd></div>
-                  <div><dt>Бій</dt><dd>{character.fame.combat.toLocaleString("uk-UA")}</dd></div>
-                  <div><dt>Життя</dt><dd>{character.fame.life.toLocaleString("uk-UA")}</dd></div>
-                  <div><dt>Інша</dt><dd>{character.fame.third.toLocaleString("uk-UA")}</dd></div>
-                </dl>
               )}
               <p className="account-seen">Оновлено {formatSeen(character.last_seen)}</p>
             </article>

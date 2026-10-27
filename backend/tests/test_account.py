@@ -38,7 +38,40 @@ def test_characters_get_level_and_xp_from_experience(client):
     assert (character["nick"], character["family"], character["class_name"]) == ("Sefir", "Testfam", "Dosa")
     assert (character["level"], character["xp"], character["xp_to_next"]) == (61, 125_316_039, 234_278_708)
     assert round(character["xp_percent"], 3) == 53.490
-    assert character["fame"]["total"] == 4706
+    assert "fame" not in character
+
+
+def test_characters_are_ordered_by_slot(client):
+    save([CharacterInfo(300.0, 7, "Mirel", "Testfam", 35, 1, 1, 1, slot=1), RECORDS[0]])
+
+    characters = client.get("/api/characters").json()
+
+    assert [(c["nick"], c["slot"], c["class_name"]) for c in characters] == [
+        ("Sefir", 0, "Dosa"), ("Mirel", 1, "Deadeye")]
+
+
+def test_old_class_ids_with_the_slot_are_split(client):
+    with main.get_connection() as connection:
+        connection.executemany("INSERT INTO characters (character_id, nick, class_id, class_name, last_seen)"
+                               " VALUES (?, ?, ?, ?, 1.0)",
+                               [(7, "Mirel", 65571, "class#65571"), (8, "Sefir", 34, "Dosa")])
+        main.account.initialize_schema(connection)
+
+    characters = client.get("/api/characters").json()
+
+    assert [(c["nick"], c["class_id"], c["slot"], c["class_name"]) for c in characters] == [
+        ("Sefir", 34, 0, "Dosa"), ("Mirel", 35, 1, None)]
+
+
+def test_fame_belongs_to_the_family(client):
+    assert client.get("/api/family").json() is None
+    save([RECORDS[0], CharacterInfo(200.0, 7, "Mobix", "Testfam", 6, 2141, 1669, 903)])
+
+    family = client.get("/api/family").json()
+
+    assert family["name"] == "Testfam"
+    assert family["fame"] == {"combat": 2141, "life": 1669, "third": 903, "total": 4713}
+    assert family["updated_at"] == 200.0
 
 
 def test_summary_after_experience_keeps_the_level(client):
