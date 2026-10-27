@@ -1,3 +1,5 @@
 fastapi==0.162.0
 pydantic==2.14.1
 uvicorn[standard]==0.54.0
+# Форк з bdo_toolkit.account (агент). Потрібні Python 3.14 і Npcap; без нього решта API працює.
+bdo-toolkit @ git+https://github.com/DvijIt/bdo-toolkit.git@9c3991ce9bc64aa9998739ed268a0cf795a6d5a7
