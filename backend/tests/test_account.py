@@ -3,7 +3,8 @@ import time
 import pytest
 
 account_models = pytest.importorskip("bdo_toolkit.account")
-from bdo_toolkit.account import CharacterInfo, Experience, GearItem, Servant, Worker  # noqa: E402
+from bdo_toolkit.account import (CharacterInfo, CharacterSummary, Experience, GearItem, Servant,  # noqa: E402
+                                 Worker)
 
 import agent as agent_module  # noqa: E402
 import arsha  # noqa: E402
@@ -38,6 +39,16 @@ def test_characters_get_level_and_xp_from_experience(client):
     assert (character["level"], character["xp"], character["xp_to_next"]) == (61, 125_316_039, 234_278_708)
     assert round(character["xp_percent"], 3) == 53.490
     assert character["fame"]["total"] == 4706
+
+
+def test_summary_after_experience_keeps_the_level(client):
+    # При вході короткий профіль приходить після досвіду.
+    save([RECORDS[0], Experience(101.0, 62, 96_763_069, 7_262_639_948),
+          CharacterSummary(102.0, CHARACTER_ID, "Sefir")])
+
+    (character,) = client.get("/api/characters").json()
+
+    assert (character["level"], character["xp"]) == (62, 96_763_069)
 
 
 def test_experience_before_any_character_is_ignored(client):

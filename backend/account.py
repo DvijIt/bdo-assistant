@@ -108,14 +108,15 @@ class AccountWriter:
         )
 
     def _character_summary(self, connection: sqlite3.Connection, r) -> None:
+        # Рівень беремо лише з досвіду: короткий профіль після левел-апу відстає.
         self.current_character_id = r.character_id
         connection.execute(
             """
-            INSERT INTO characters (character_id, nick, level, last_seen) VALUES (?, ?, ?, ?)
+            INSERT INTO characters (character_id, nick, last_seen) VALUES (?, ?, ?)
             ON CONFLICT (character_id) DO UPDATE SET
-                nick = excluded.nick, level = excluded.level, last_seen = excluded.last_seen
+                nick = excluded.nick, last_seen = excluded.last_seen
             """,
-            (r.character_id, r.nick, r.level, r.observed_at),
+            (r.character_id, r.nick, r.observed_at),
         )
 
     def _experience(self, connection: sqlite3.Connection, r) -> None:
