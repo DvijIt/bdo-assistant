@@ -175,6 +175,7 @@ export default function Home() {
         <Link href="/inventory" className="nav-item">◉ <span>Мої ресурси</span></Link>
         <Link href="/workers" className="nav-item">⚒ <span>Робітники</span></Link>
         <Link href="/transport" className="nav-item">⚓ <span>Транспорт</span></Link>
+        <Link href="/knowledge" className="nav-item">✦ <span>Знання</span></Link>
         <div className="nav-item">◎ <span>План прогресу</span></div>
 
         <div className="sidebar-bottom">

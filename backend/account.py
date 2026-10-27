@@ -64,7 +64,23 @@ SCHEMA = """
         PRIMARY KEY (kind_id, name, slot),
         FOREIGN KEY (kind_id, name) REFERENCES servants (kind_id, name) ON DELETE CASCADE
     );
+
+    -- Книга знань спільна для сім'ї; рівень 1–5, ймовірно C…SS.
+    CREATE TABLE IF NOT EXISTS knowledge (
+        knowledge_id INTEGER PRIMARY KEY,
+        level INTEGER NOT NULL,
+        last_seen REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_summary (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        ecology_points INTEGER NOT NULL,
+        updated_at REAL NOT NULL
+    );
 """
+
+# Ймовірна відповідність рівнів буквам у грі; не перевірена на конкретних знаннях.
+KNOWLEDGE_GRADES = {1: "C", 2: "B", 3: "A", 4: "S", 5: "SS"}
 
 # Незнищенні предмети (наприклад, спорядження табору) мають максимальну міцність 32767.
 INDESTRUCTIBLE = 32767
@@ -162,6 +178,38 @@ class AccountWriter:
             """,
             [(r.kind_id, r.name, g.slot, g.item_id, g.count, g.durability, g.max_durability) for g in r.gear],
         )
+
+
+    def _knowledge_batch(self, connection: sqlite3.Connection, r) -> None:
+        connection.executemany(
+            """
+            INSERT INTO knowledge (knowledge_id, level, last_seen) VALUES (?, ?, ?)
+            ON CONFLICT (knowledge_id) DO UPDATE SET level = excluded.level, last_seen = excluded.last_seen
+            """,
+            [(e.knowledge_id, e.level, r.observed_at) for e in r.entries],
+        )
+        connection.execute(
+            """
+            INSERT INTO knowledge_summary (id, ecology_points, updated_at) VALUES (1, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                ecology_points = excluded.ecology_points, updated_at = excluded.updated_at
+            """,
+            (r.ecology_points, r.observed_at),
+        )
+
+
+def knowledge_summary(connection: sqlite3.Connection) -> dict:
+    summary = connection.execute("SELECT ecology_points, updated_at FROM knowledge_summary WHERE id = 1").fetchone()
+    counts = dict(connection.execute("SELECT level, COUNT(*) FROM knowledge GROUP BY level").fetchall())
+    return {
+        "total": sum(counts.values()),
+        "ecology_points": None if summary is None else summary["ecology_points"],
+        "updated_at": None if summary is None else summary["updated_at"],
+        "by_level": [
+            {"level": level, "grade": KNOWLEDGE_GRADES.get(level), "count": counts.get(level, 0)}
+            for level in sorted(set(KNOWLEDGE_GRADES) | set(counts))
+        ],
+    }
 
 
 def list_characters(connection: sqlite3.Connection) -> list[dict]:

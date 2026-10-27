@@ -277,6 +277,12 @@ def get_workers():
         return account.list_workers(connection)
 
 
+@app.get("/api/knowledge")
+def get_knowledge():
+    with get_connection() as connection:
+        return account.knowledge_summary(connection)
+
+
 @app.get("/api/servants")
 def get_servants():
     with get_connection() as connection:

@@ -3,8 +3,8 @@ import time
 import pytest
 
 account_models = pytest.importorskip("bdo_toolkit.account")
-from bdo_toolkit.account import (CharacterInfo, CharacterSummary, Experience, GearItem, Servant,  # noqa: E402
-                                 Worker)
+from bdo_toolkit.account import (CharacterInfo, CharacterSummary, Experience, GearItem,  # noqa: E402
+                                 KnowledgeBatch, KnowledgeEntry, Servant, Worker)
 
 import agent as agent_module  # noqa: E402
 import arsha  # noqa: E402
@@ -93,6 +93,22 @@ def test_servants_gear_gets_item_names_on_refresh(client, monkeypatch):
     (camp_item,) = servants["Campsite"]["gear"]
     assert servants["Campsite"]["category"] == "camp"
     assert (camp_item["name"], camp_item["durability"]) == (None, None)  # незнищенне
+
+
+def test_knowledge_from_several_batches(client):
+    assert client.get("/api/knowledge").json()["total"] == 0
+
+    save([
+        KnowledgeBatch(300.0, 2591, (KnowledgeEntry(1, 1), KnowledgeEntry(2, 5))),
+        KnowledgeBatch(300.0, 2591, (KnowledgeEntry(3, 2),)),
+    ])
+    # Наступний вхід: знання 3 підвищило рівень, з'явилось нове.
+    save([KnowledgeBatch(400.0, 2596, (KnowledgeEntry(3, 3), KnowledgeEntry(4, 1)))])
+
+    knowledge = client.get("/api/knowledge").json()
+
+    assert (knowledge["total"], knowledge["ecology_points"], knowledge["updated_at"]) == (4, 2596, 400.0)
+    assert {row["grade"]: row["count"] for row in knowledge["by_level"]} == {"C": 2, "B": 0, "A": 1, "S": 0, "SS": 1}
 
 
 class FakeSession:

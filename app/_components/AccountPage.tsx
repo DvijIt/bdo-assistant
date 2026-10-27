@@ -9,6 +9,7 @@ const PAGES = [
   { href: "/characters/", label: "Персонажі" },
   { href: "/workers/", label: "Робітники" },
   { href: "/transport/", label: "Транспорт" },
+  { href: "/knowledge/", label: "Знання" },
   { href: "/inventory/", label: "Ресурси" },
 ];
 

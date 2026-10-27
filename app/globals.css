@@ -1350,3 +1350,34 @@ a.nav-item {
     align-items: flex-start;
   }
 }
+
+.account-summary-date {
+  font-size: 17px;
+}
+
+.knowledge-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px 0 18px;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-levels li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 12px;
+}
+
+.knowledge-levels strong {
+  font-size: 13px;
+  text-align: right;
+}
+
+.knowledge-grade {
+  color: var(--gold-light);
+  font-size: 13px;
+  font-weight: 600;
+}
