@@ -33,4 +33,10 @@ export type AgentStatus = {
   messages: number;
   records: number;
   last_record_at: number | null;
+  inventory: {
+    enabled: boolean;
+    note: string | null;
+    snapshots: number;
+    last: { character: string; at: number; inventory_stacks: number; storage_stacks: number } | null;
+  };
 };

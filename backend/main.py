@@ -56,8 +56,27 @@ def initialize_database():
         account.initialize_schema(connection)
 
 
+def opcode_profile() -> Path | None:
+    """Профіль опкодів bdo-toolkit для знімків інвентаря: BDO_OPCODE_PROFILE або backend/opcodes.local."""
+    path = Path(os.environ.get("BDO_OPCODE_PROFILE") or BASE_DIR / "opcodes.local")
+    return path if path.is_file() else None
+
+
+def import_agent_snapshot(data: dict, character: str) -> dict:
+    with get_connection() as connection:
+        summary = snapshots.import_snapshot(connection, data, character)
+    # Як і для ручного імпорту: недоступний arsha.io не відкочує вже збережений знімок.
+    with get_connection() as connection:
+        summary["missing_names"] = refresh_item_names(connection)
+    return summary
+
+
 # DB_PATH читається під час кожного з'єднання, тож тести можуть його підміняти.
-agent = agent_module.Agent(lambda: get_connection())
+agent = agent_module.Agent(
+    lambda: get_connection(),
+    inventory_profile=lambda: opcode_profile(),
+    import_snapshot=lambda data, character: import_agent_snapshot(data, character),
+)
 
 
 @asynccontextmanager

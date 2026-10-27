@@ -22,6 +22,17 @@ const STATE_LABELS: Record<AgentStatus["state"], string> = {
 
 const POLL_MS = 3000;
 
+function inventoryLine(inventory: AgentStatus["inventory"]) {
+  if (inventory.note) return inventory.note;
+  if (!inventory.enabled) return "Інвентар не знімається.";
+  if (!inventory.last) return "Інвентар і склади знімаються при кожному вході у світ.";
+  const { last } = inventory;
+  return (
+    `Інвентар: ${inventory.snapshots} знімк. · останній ${last.character}, ${formatSeen(last.at)} — ` +
+    `${last.inventory_stacks} в інвентарі, ${last.storage_stacks} на складах`
+  );
+}
+
 /** Каркас сторінок акаунта: шапка, навігація й панель агента.
  * `onRecords` викликається, коли агент записав нові дані — сторінка перезавантажує свої. */
 export function AccountPage({
@@ -114,6 +125,9 @@ export function AccountPage({
                   (agent.last_record_at ? ` · останній ${formatSeen(agent.last_record_at)}` : "")
                 : "Дані приходять лише при вході персонажем у світ — увімкни агента до входу.")}
           </span>
+          {agent && running && (
+            <span>{inventoryLine(agent.inventory)}</span>
+          )}
         </div>
         <button className="outline-button" type="button" onClick={() => void toggleAgent()} disabled={!agent || busy}>
           {running ? "■ Зупинити" : "▶ Увімкнути агента"}
