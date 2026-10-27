@@ -1392,3 +1392,28 @@ a.nav-item {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.home-characters {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-characters .progress-row {
+  margin: 0 0 7px;
+}
+
+.home-characters .progress-row span {
+  color: var(--muted);
+}
+
+.home-characters .progress-row span strong {
+  color: var(--text);
+}
+
+.main-content > .agent-bar {
+  margin-top: 0;
+}

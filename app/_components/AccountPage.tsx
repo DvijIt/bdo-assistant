@@ -33,21 +33,8 @@ function inventoryLine(inventory: AgentStatus["inventory"]) {
   );
 }
 
-/** Каркас сторінок акаунта: шапка, навігація й панель агента.
- * `onRecords` викликається, коли агент записав нові дані — сторінка перезавантажує свої. */
-export function AccountPage({
-  active,
-  title,
-  subtitle,
-  onRecords,
-  children,
-}: {
-  active: string;
-  title: string;
-  subtitle: string;
-  onRecords: () => void;
-  children: ReactNode;
-}) {
+/** Стан агента з опитуванням; `onRecords` викликається, коли агент записав нові дані. */
+export function useAgent(onRecords: () => void) {
   const [agent, setAgent] = useState<AgentStatus | null>(null);
   const [agentError, setAgentError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -96,7 +83,50 @@ export function AccountPage({
   }
 
   const running = agent?.state === "running" || agent?.state === "starting";
+  return { agent, agentError, busy, running, toggleAgent };
+}
 
+/** Панель агента: стан, лічильники, знімки інвентаря й кнопка ввімкнення. */
+export function AgentBar({ onRecords }: { onRecords: () => void }) {
+  const { agent, agentError, busy, running, toggleAgent } = useAgent(onRecords);
+
+  return (
+    <section className={`agent-bar ${agent?.state ?? "unknown"}`}>
+      <div className="connection-dot" />
+      <div className="agent-bar-copy">
+        <strong>{agent ? STATE_LABELS[agent.state] : "Стан агента невідомий"}</strong>
+        <span>
+          {agentError ||
+            agent?.error ||
+            (agent && running
+              ? `${agent.messages.toLocaleString("uk-UA")} повідомлень · ${agent.records} записів` +
+                (agent.last_record_at ? ` · останній ${formatSeen(agent.last_record_at)}` : "")
+              : "Дані приходять лише при вході персонажем у світ — увімкни агента до входу.")}
+        </span>
+        {agent && running && <span>{inventoryLine(agent.inventory)}</span>}
+      </div>
+      <button className="outline-button" type="button" onClick={() => void toggleAgent()} disabled={!agent || busy}>
+        {running ? "■ Зупинити" : "▶ Увімкнути агента"}
+      </button>
+    </section>
+  );
+}
+
+/** Каркас сторінок акаунта: шапка, навігація й панель агента.
+ * `onRecords` викликається, коли агент записав нові дані — сторінка перезавантажує свої. */
+export function AccountPage({
+  active,
+  title,
+  subtitle,
+  onRecords,
+  children,
+}: {
+  active: string;
+  title: string;
+  subtitle: string;
+  onRecords: () => void;
+  children: ReactNode;
+}) {
   return (
     <main className="inventory-page">
       <header className="inventory-header">
@@ -113,26 +143,7 @@ export function AccountPage({
         </nav>
       </header>
 
-      <section className={`agent-bar ${agent?.state ?? "unknown"}`}>
-        <div className="connection-dot" />
-        <div className="agent-bar-copy">
-          <strong>{agent ? STATE_LABELS[agent.state] : "Стан агента невідомий"}</strong>
-          <span>
-            {agentError ||
-              agent?.error ||
-              (agent && running
-                ? `${agent.messages.toLocaleString("uk-UA")} повідомлень · ${agent.records} записів` +
-                  (agent.last_record_at ? ` · останній ${formatSeen(agent.last_record_at)}` : "")
-                : "Дані приходять лише при вході персонажем у світ — увімкни агента до входу.")}
-          </span>
-          {agent && running && (
-            <span>{inventoryLine(agent.inventory)}</span>
-          )}
-        </div>
-        <button className="outline-button" type="button" onClick={() => void toggleAgent()} disabled={!agent || busy}>
-          {running ? "■ Зупинити" : "▶ Увімкнути агента"}
-        </button>
-      </section>
+      <AgentBar onRecords={onRecords} />
 
       {children}
 

@@ -1,161 +1,140 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
 
-type Task = {
-  id: number;
-  title: string;
-  detail: string;
-  reward: string;
-  done: boolean;
+import { AgentBar, useApiData } from "./_components/AccountPage";
+import { formatSeen, formatSilver } from "./_lib/api";
+
+type Family = {
+  name: string | null;
+  fame: { combat: number; life: number; third: number; total: number };
+  updated_at: number;
+} | null;
+
+type Character = {
+  character_id: string;
+  nick: string;
+  class_name: string | null;
+  level: number | null;
+  xp_percent: number | null;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+type Account = {
+  total_value: number;
+  silver: number;
+  priced_stacks: number;
+  unpriced_stacks: number;
+  prices_fetched_at: string | null;
+};
+
+type Worker = { worker_id: string; stamina: number; town_name: string };
+
+type Servants = {
+  servants: {
+    name: string;
+    gear: { name: string | null; item_id: number; durability: number | null; max_durability: number | null }[];
+  }[];
+};
+
+type Knowledge = { total: number; ecology_points: number | null };
+
+type Snapshot = { id: number };
+
+type Attention = { key: string; title: string; detail: string; href: string };
+
+// Нижче цієї частки міцності спорядження варто полагодити.
+const LOW_DURABILITY = 0.5;
+// Персонаж близько до наступного рівня.
+const NEAR_LEVEL_UP = 90;
+
+function attentionItems(
+  characters: Character[],
+  workers: Worker[],
+  servants: Servants["servants"],
+  snapshots: Snapshot[] | null,
+  account: Account | null,
+): Attention[] {
+  const items: Attention[] = [];
+
+  const tired = workers.filter((worker) => worker.stamina === 0);
+  if (tired.length > 0) {
+    const towns = [...new Set(tired.map((worker) => worker.town_name))].join(", ");
+    items.push({
+      key: "workers",
+      title: `${tired.length} робітн. без витривалості`,
+      detail: `Нагодуй їх, щоб відновити роботу: ${towns}.`,
+      href: "/workers",
+    });
+  }
+
+  const worn = servants.flatMap((servant) =>
+    servant.gear
+      .filter((gear) => gear.max_durability && gear.durability !== null &&
+        gear.durability < gear.max_durability * LOW_DURABILITY)
+      .map((gear) => `${servant.name}: ${gear.name ?? `#${gear.item_id}`} ${gear.durability}/${gear.max_durability}`),
+  );
+  if (worn.length > 0) {
+    items.push({
+      key: "gear",
+      title: `${worn.length} предм. спорядження зношено`,
+      detail: worn.join(" · "),
+      href: "/transport",
+    });
+  }
+
+  for (const character of characters) {
+    if (character.xp_percent !== null && character.xp_percent >= NEAR_LEVEL_UP) {
+      items.push({
+        key: `level-${character.character_id}`,
+        title: `${character.nick} близько до Lv. ${(character.level ?? 0) + 1}`,
+        detail: `Досвід ${character.xp_percent.toFixed(1)}% — трохи гринду до нового рівня.`,
+        href: "/characters",
+      });
+    }
+  }
+
+  if (snapshots !== null && snapshots.length === 0) {
+    items.push({
+      key: "inventory",
+      title: "Знімків інвентаря ще немає",
+      detail: "Увімкни агента й зайди персонажем у світ — інвентар і склади знімуться самі.",
+      href: "/inventory",
+    });
+  } else if (account && (!account.prices_fetched_at || account.unpriced_stacks > account.priced_stacks)) {
+    items.push({
+      key: "prices",
+      title: account.prices_fetched_at ? "Більшість предметів без ціни" : "Ціни ринку не завантажені",
+      detail: "Без них вартість акаунта неповна. Онови ціни на сторінці ресурсів.",
+      href: "/inventory",
+    });
+  }
+
+  return items;
+}
 
 export default function Home() {
-  const [character, setCharacter] = useState("Мій персонаж");
-  const [characterClass, setCharacterClass] = useState("Woosa");
-  const [ap, setAp] = useState(280);
-  const [dp, setDp] = useState(350);
-  const [silver, setSilver] = useState("12.5");
-  const [goal, setGoal] = useState("gear");
-  const [editing, setEditing] = useState(false);
-  const [tasks, setTasks] = useState<Task[]>([
-    {
-      id: 1,
-      title: "Перевірити спорядження",
-      detail: "Уточни поточні предмети та рівень їх посилення",
-      reward: "План прогресу",
-      done: false,
-    },
-    {
-      id: 2,
-      title: "Визначити наступну ціль",
-      detail: "Обери предмет або характеристику для покращення",
-      reward: "Чіткий пріоритет",
-      done: false,
-    },
-    {
-      id: 3,
-      title: "Підготувати ресурси",
-      detail: "Перевір срібло й потрібні матеріали",
-      reward: "Готовність до прогресу",
-      done: false,
-    },
-  ]);
-  const [apiStatus, setApiStatus] = useState("Завантаження...");
-  const [saving, setSaving] = useState(false);
+  const family = useApiData<Family>("/api/family");
+  const characters = useApiData<Character[]>("/api/characters");
+  const account = useApiData<Account>("/api/account");
+  const workers = useApiData<Worker[]>("/api/workers");
+  const servants = useApiData<Servants>("/api/servants");
+  const knowledge = useApiData<Knowledge>("/api/knowledge");
+  const snapshots = useApiData<Snapshot[]>("/api/snapshots");
 
-
-  useEffect(() => {
-    async function loadProfile() {
-      try {
-        const response = await fetch(`${API}/api/profile`);
-
-        if (!response.ok) {
-          throw new Error("Не вдалося завантажити профіль");
-        }
-
-        const profile = await response.json();
-
-        setCharacter(profile.character_name);
-        setCharacterClass(profile.character_class);
-        setAp(profile.ap);
-        setDp(profile.dp);
-        setSilver(String(profile.silver_billions));
-        setGoal(profile.goal);
-        setApiStatus("Дані завантажено з бази");
-      } catch (error) {
-        console.error(error);
-        setApiStatus("API недоступний — перевір сервер");
-      }
-    }
-
-    loadProfile();
-  }, []);
-
-
-  const completed = tasks.filter((task) => task.done).length;
-
-  const goalLabels: Record<string, string> = {
-    gear: "Покращити спорядження",
-    silver: "Заробити срібло",
-    pve: "Підготуватися до PvE",
-    life: "Розвивати Life Skills",
-  };
-
-
-  async function saveProfile() {
-    setSaving(true);
-    setApiStatus("Збереження...");
-
-    try {
-      const response = await fetch(
-        `${API}/api/profile`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            character_name: character,
-            character_class: characterClass,
-            ap,
-            dp,
-            silver_billions: Number(silver),
-            goal,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || "Помилка збереження");
-      }
-
-      const profile = await response.json();
-
-      setCharacter(profile.character_name);
-      setCharacterClass(profile.character_class);
-      setAp(profile.ap);
-      setDp(profile.dp);
-      setSilver(String(profile.silver_billions));
-      setGoal(profile.goal);
-      setEditing(false);
-      setApiStatus("Збережено в SQLite ✓");
-    } catch (error) {
-      console.error(error);
-      setApiStatus("Помилка збереження. Перевір API та введені дані.");
-    } finally {
-      setSaving(false);
-    }
+  function reloadAll() {
+    for (const source of [family, characters, account, workers, servants, knowledge, snapshots]) source.reload();
   }
 
-
-  function toggleTask(id: number) {
-    setTasks((current) =>
-      current.map((task) =>
-        task.id === id ? { ...task, done: !task.done } : task
-      )
-    );
-  }
-
-  function addTask() {
-    const title = window.prompt("Назва нового завдання?");
-    if (!title?.trim()) return;
-
-    setTasks((current) => [
-      ...current,
-      {
-        id: Date.now(),
-        title: title.trim(),
-        detail: "Твоє персональне завдання",
-        reward: "Власна ціль",
-        done: false,
-      },
-    ]);
-  }
+  const list = characters.data ?? [];
+  const top = list.reduce<Character | null>(
+    (best, character) => ((character.level ?? 0) > (best?.level ?? -1) ? character : best),
+    null,
+  );
+  const fame = family.data?.fame;
+  const attention = attentionItems(list, workers.data ?? [], servants.data?.servants ?? [], snapshots.data,
+    account.data);
+  const error = [family, characters, account, workers, servants, knowledge, snapshots].find((s) => s.error)?.error;
+  const hasData = list.length > 0;
 
   return (
     <main className="app-shell">
@@ -171,18 +150,16 @@ export default function Home() {
         <div className="nav-label">WORKSPACE</div>
         <div className="nav-item active">◈ <span>Огляд</span></div>
         <Link href="/characters" className="nav-item">⚔ <span>Мої персонажі</span></Link>
-        <div className="nav-item">◇ <span>Спорядження</span></div>
         <Link href="/inventory" className="nav-item">◉ <span>Мої ресурси</span></Link>
         <Link href="/workers" className="nav-item">⚒ <span>Робітники</span></Link>
         <Link href="/transport" className="nav-item">⚓ <span>Транспорт</span></Link>
         <Link href="/knowledge" className="nav-item">✦ <span>Знання</span></Link>
-        <div className="nav-item">◎ <span>План прогресу</span></div>
 
         <div className="sidebar-bottom">
           <div className="connection-dot" />
           <div>
             <strong>Локальний режим</strong>
-            <span>Демонстраційні дані</span>
+            <span>Дані з трафіку гри</span>
           </div>
         </div>
       </aside>
@@ -191,46 +168,34 @@ export default function Home() {
         <header className="topbar">
           <div>
             <div className="eyebrow">BLACK DESERT ONLINE / EU</div>
-            <div className="api-status">{apiStatus}</div>
-            <h1>Твоя пригода<span className="gold">.</span></h1>
+            <h1>{family.data?.name ?? "Твоя пригода"}<span className="gold">.</span></h1>
           </div>
-          <button
-            className="outline-button"
-            disabled={saving}
-            onClick={() => {
-              if (editing) {
-                void saveProfile();
-              } else {
-                setEditing(true);
-              }
-            }}
-          >
-            {saving
-              ? "Збереження..."
-              : editing
-                ? "✓ Зберегти"
-                : "✎ Редагувати профіль"}
-          </button>
         </header>
+
+        <AgentBar onRecords={reloadAll} />
+
+        {error && <p className="inventory-feedback error">{error}. Перевір, що API запущено.</p>}
 
         <section className="welcome-panel">
           <div className="welcome-copy">
-            <div className="eyebrow gold-text">ТВІЙ ПЕРСОНАЛЬНИЙ АСИСТЕНТ</div>
-            <h2>Кожен крок має<br />наближати до цілі.</h2>
+            <div className="eyebrow gold-text">СІМ&apos;Я{family.data?.name ? ` ${family.data.name.toUpperCase()}` : ""}</div>
+            {hasData ? (
+              <h2>
+                {list.length} персонаж{list.length === 1 ? "" : "ів"}
+                <br />
+                слава {fame ? fame.total.toLocaleString("uk-UA") : "—"}
+              </h2>
+            ) : (
+              <h2>Зайди в гру<br />з увімкненим агентом.</h2>
+            )}
             <p>
-              Відстежуй прогрес, плануй покращення та визначай,
-              на чому варто зосередитися далі.
+              {hasData && family.data
+                ? `Дані оновлено ${formatSeen(family.data.updated_at)}. Усе приходить з трафіку гри при вході персонажем у світ.`
+                : "Агент пасивно читає трафік гри: персонажі, робітники, транспорт, знання, інвентар і склади з'являться тут самі."}
             </p>
-            <button
-              className="primary-button"
-              onClick={() =>
-                document.getElementById("next-steps")?.scrollIntoView({
-                  behavior: "smooth",
-                })
-              }
-            >
-              Переглянути план <span>→</span>
-            </button>
+            <Link className="primary-button" href="/characters">
+              Мої персонажі <span>→</span>
+            </Link>
           </div>
           <div className="hero-emblem" aria-hidden="true">
             <div className="emblem-ring">
@@ -243,184 +208,114 @@ export default function Home() {
 
         <div className="section-heading">
           <div>
-            <div className="eyebrow">CHARACTER OVERVIEW</div>
-            <h2>Твій персонаж</h2>
+            <div className="eyebrow">ACCOUNT OVERVIEW</div>
+            <h2>Акаунт</h2>
           </div>
-          <span className="demo-badge">DEMO DATA</span>
         </div>
 
         <section className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-top">
+              <span className="stat-icon">✧</span>
+              <span className="muted-label">СЛАВА СІМ&apos;Ї</span>
+            </div>
+            <div className="stat-value">{fame ? fame.total.toLocaleString("uk-UA") : "—"}</div>
+            <div className="stat-caption">
+              {fame ? `Бій ${fame.combat} · Життя ${fame.life} · Інша ${fame.third}` : "Після входу персонажем"}
+            </div>
+          </div>
+
           <div className="stat-card character-card">
             <div className="stat-top">
-              <span className="stat-icon">♙</span>
-              <span className="muted-label">ПЕРСОНАЖ</span>
-            </div>
-            {editing ? (
-              <input
-                className="edit-input"
-                value={character}
-                onChange={(e) => setCharacter(e.target.value)}
-                aria-label="Ім'я персонажа"
-              />
-            ) : (
-              <div className="stat-value">{character}</div>
-            )}
-            {editing ? (
-              <input
-                className="edit-input"
-                value={characterClass}
-                onChange={(e) => setCharacterClass(e.target.value)}
-                aria-label="Клас персонажа"
-              />
-            ) : (
-              <div className="stat-caption">{characterClass} · Class</div>
-            )}
-          </div>
-
-          <div className="stat-card">
-            <div className="stat-top">
               <span className="stat-icon">⚔</span>
-              <span className="muted-label">ATTACK</span>
+              <span className="muted-label">НАЙВИЩИЙ РІВЕНЬ</span>
             </div>
-            {editing ? (
-              <input
-                className="edit-input"
-                type="number"
-                value={ap}
-                onChange={(e) => setAp(Number(e.target.value))}
-                aria-label="AP"
-              />
-            ) : (
-              <div className="stat-value">{ap} <small>AP</small></div>
-            )}
-            <div className="stat-caption">Атака</div>
-          </div>
-
-          <div className="stat-card">
-            <div className="stat-top">
-              <span className="stat-icon">⬡</span>
-              <span className="muted-label">DEFENSE</span>
-            </div>
-            {editing ? (
-              <input
-                className="edit-input"
-                type="number"
-                value={dp}
-                onChange={(e) => setDp(Number(e.target.value))}
-                aria-label="DP"
-              />
-            ) : (
-              <div className="stat-value">{dp} <small>DP</small></div>
-            )}
-            <div className="stat-caption">Захист</div>
+            <div className="stat-value">{top ? `Lv. ${top.level ?? "—"}` : "—"}</div>
+            <div className="stat-caption">{top ? `${top.nick} · ${top.class_name ?? "клас невідомий"}` : "Немає персонажів"}</div>
           </div>
 
           <div className="stat-card">
             <div className="stat-top">
               <span className="stat-icon">◈</span>
-              <span className="muted-label">SILVER</span>
+              <span className="muted-label">ВАРТІСТЬ АКАУНТА</span>
             </div>
-            {editing ? (
-              <input
-                className="edit-input"
-                value={silver}
-                onChange={(e) => setSilver(e.target.value)}
-                aria-label="Срібло в мільярдах"
-              />
-            ) : (
-              <div className="stat-value">{silver} <small>B</small></div>
-            )}
-            <div className="stat-caption">Срібло, млрд (приклад)</div>
+            <div className="stat-value">
+              {account.data?.prices_fetched_at ? formatSilver(account.data.total_value) : "—"}
+            </div>
+            <div className="stat-caption">
+              {account.data ? `Срібло ${formatSilver(account.data.silver)}` : "Після знімка інвентаря"}
+            </div>
+          </div>
+
+          <div className="stat-card">
+            <div className="stat-top">
+              <span className="stat-icon">✦</span>
+              <span className="muted-label">ЗНАННЯ</span>
+            </div>
+            <div className="stat-value">{knowledge.data?.total ? knowledge.data.total.toLocaleString("uk-UA") : "—"}</div>
+            <div className="stat-caption">
+              {knowledge.data?.ecology_points != null ? `Очки екології ${knowledge.data.ecology_points}` : "Після входу персонажем"}
+            </div>
           </div>
         </section>
 
         <div className="content-grid">
-          <section className="panel" id="next-steps">
+          <section className="panel">
             <div className="panel-heading">
               <div>
-                <div className="eyebrow">YOUR ROADMAP</div>
-                <h2>Наступні кроки</h2>
+                <div className="eyebrow">NEEDS ATTENTION</div>
+                <h2>Потребує уваги</h2>
               </div>
-              <button className="text-button" onClick={addTask}>+ Додати</button>
             </div>
 
-            <div className="progress-row">
-              <span>Виконано завдань</span>
-              <strong>{completed} / {tasks.length}</strong>
-            </div>
-            <div className="progress-track">
-              <div
-                className="progress-fill"
-                style={{
-                  width: `${tasks.length ? (completed / tasks.length) * 100 : 0}%`,
-                }}
-              />
-            </div>
-
-            <div className="task-list">
-              {tasks.map((task, index) => (
-                <button
-                  className={`task-item ${task.done ? "task-done" : ""}`}
-                  key={task.id}
-                  onClick={() => toggleTask(task.id)}
-                >
-                  <span className="task-number">
-                    {task.done ? "✓" : String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="task-copy">
-                    <strong>{task.title}</strong>
-                    <span>{task.detail}</span>
-                    <small>{task.reward}</small>
-                  </span>
-                  <span className="task-arrow">{task.done ? "↺" : "→"}</span>
-                </button>
-              ))}
-            </div>
+            {attention.length === 0 ? (
+              <p className="panel-description">
+                {hasData ? "Усе гаразд: робітники мають витривалість, спорядження ціле." : "Даних ще немає."}
+              </p>
+            ) : (
+              <div className="task-list">
+                {attention.map((item, index) => (
+                  <Link className="task-item" href={item.href} key={item.key}>
+                    <span className="task-number">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="task-copy">
+                      <strong>{item.title}</strong>
+                      <span>{item.detail}</span>
+                    </span>
+                    <span className="task-arrow">→</span>
+                  </Link>
+                ))}
+              </div>
+            )}
           </section>
 
-          <section className="panel goal-panel">
-            <div className="eyebrow">PERSONAL SETTINGS</div>
-            <h2>Твоя ціль</h2>
-            <p className="panel-description">
-              Обери напрям, і ми адаптуємо рекомендації під твій стиль гри.
-            </p>
-
-            <label className="field-label" htmlFor="goal-select">
-              ГОЛОВНИЙ ПРІОРИТЕТ
-            </label>
-            <select
-              id="goal-select"
-              className="goal-select"
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-            >
-              <option value="gear">Покращити спорядження</option>
-              <option value="silver">Заробити срібло</option>
-              <option value="pve">Підготуватися до PvE</option>
-              <option value="life">Розвивати Life Skills</option>
-            </select>
-
-            <div className="goal-result">
-              <div className="goal-icon">✧</div>
+          <section className="panel">
+            <div className="panel-heading">
               <div>
-                <span className="muted-label">АКТИВНА ЦІЛЬ</span>
-                <strong>{goalLabels[goal]}</strong>
-                <p>
-                  {goal === "gear" && "Почнемо з перевірки спорядження та доступних покращень."}
-                  {goal === "silver" && "Порівняємо можливі джерела доходу й потрібні витрати."}
-                  {goal === "pve" && "Оцінимо характеристики та підберемо напрям розвитку."}
-                  {goal === "life" && "Зберемо інформацію про професії, рівні та ресурси."}
-                </p>
+                <div className="eyebrow">CHARACTERS</div>
+                <h2>Персонажі</h2>
               </div>
+              <Link className="text-button" href="/characters">Усі →</Link>
             </div>
 
-            <div className="notice">
-              <span>ⓘ</span>
-              <p>
-                Це початковий прототип. Рекомендації поки не використовують
-                реальні дані твого акаунта.
-              </p>
-            </div>
+            {list.length === 0 ? (
+              <p className="panel-description">Персонажі з&apos;являться після входу ними у світ.</p>
+            ) : (
+              <ul className="home-characters">
+                {list.map((character) => (
+                  <li key={character.character_id}>
+                    <div className="progress-row">
+                      <span>
+                        <strong>{character.nick}</strong> · {character.class_name ?? "клас невідомий"}
+                      </span>
+                      <strong>Lv. {character.level ?? "—"}</strong>
+                    </div>
+                    <div className="progress-track">
+                      <div className="progress-fill" style={{ width: `${Math.min(character.xp_percent ?? 0, 100)}%` }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         </div>
 
