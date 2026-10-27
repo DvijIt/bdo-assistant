@@ -1,5 +1,6 @@
 
 from contextlib import asynccontextmanager, contextmanager
+import os
 from pathlib import Path
 import sqlite3
 
@@ -7,6 +8,8 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import account
+import agent as agent_module
 import arsha
 import snapshots
 import valuation
@@ -50,12 +53,39 @@ def initialize_database():
 
         snapshots.initialize_schema(connection)
         valuation.initialize_schema(connection)
+        account.initialize_schema(connection)
+
+
+def opcode_profile() -> Path | None:
+    """Профіль опкодів bdo-toolkit для знімків інвентаря: BDO_OPCODE_PROFILE або backend/opcodes.local."""
+    path = Path(os.environ.get("BDO_OPCODE_PROFILE") or BASE_DIR / "opcodes.local")
+    return path if path.is_file() else None
+
+
+def import_agent_snapshot(data: dict, character: str) -> dict:
+    with get_connection() as connection:
+        summary = snapshots.import_snapshot(connection, data, character)
+    # Як і для ручного імпорту: недоступний arsha.io не відкочує вже збережений знімок.
+    with get_connection() as connection:
+        summary["missing_names"] = refresh_item_names(connection)
+    return summary
+
+
+# DB_PATH читається під час кожного з'єднання, тож тести можуть його підміняти.
+agent = agent_module.Agent(
+    lambda: get_connection(),
+    inventory_profile=lambda: opcode_profile(),
+    import_snapshot=lambda data, character: import_agent_snapshot(data, character),
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_database()
+    if os.environ.get("BDO_AGENT_AUTOSTART") == "1":
+        agent.start()
     yield
+    agent.stop()
 
 
 app = FastAPI(
@@ -148,14 +178,17 @@ def refresh_item_names(connection):
 
     Повертає кількість предметів, що лишилися без назви.
     """
-    missing = snapshots.missing_item_ids(connection)
+    def missing_ids():
+        return sorted(set(snapshots.missing_item_ids(connection)) | set(account.missing_gear_item_ids(connection)))
+
+    missing = missing_ids()
     if missing:
         try:
             snapshots.save_items(connection, arsha.fetch_items(missing))
         except (OSError, ValueError):
             # arsha.io неофіційний і може не відповісти; назви дотягнемо пізніше.
             pass
-    return len(snapshots.missing_item_ids(connection))
+    return len(missing_ids())
 
 
 @app.get("/api/snapshots")
@@ -214,6 +247,8 @@ def refresh_prices(full: bool = False):
     # full=true перепитує й предмети, які раніше були поза ринком.
     with get_connection() as connection:
         item_ids = valuation.item_ids_to_price(connection, include_off_market=full)
+        gear_ids = {row[0] for row in connection.execute("SELECT DISTINCT item_id FROM servant_gear")}
+        item_ids = sorted(set(item_ids) | gear_ids)
 
     try:
         entries = arsha.fetch_market(item_ids)
@@ -232,3 +267,51 @@ def refresh_prices(full: bool = False):
 def refresh_items():
     with get_connection() as connection:
         return {"missing_names": refresh_item_names(connection)}
+
+
+@app.get("/api/agent")
+def get_agent():
+    return agent.status()
+
+
+@app.post("/api/agent/start")
+def start_agent():
+    return agent.start()
+
+
+@app.post("/api/agent/stop")
+def stop_agent():
+    return agent.stop()
+
+
+@app.get("/api/characters")
+def get_characters():
+    with get_connection() as connection:
+        return account.list_characters(connection)
+
+
+@app.get("/api/family")
+def get_family():
+    with get_connection() as connection:
+        return account.family_summary(connection)
+
+
+@app.get("/api/workers")
+def get_workers():
+    with get_connection() as connection:
+        return account.list_workers(connection)
+
+
+@app.get("/api/knowledge")
+def get_knowledge():
+    with get_connection() as connection:
+        return account.knowledge_summary(connection)
+
+
+@app.get("/api/servants")
+def get_servants():
+    with get_connection() as connection:
+        return {
+            "servants": account.list_servants(connection, valuation.unit_prices(connection)),
+            "missing_names": len(account.missing_gear_item_ids(connection)),
+        }
