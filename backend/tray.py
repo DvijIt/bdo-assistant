@@ -15,11 +15,20 @@ import threading
 import time
 import webbrowser
 
-import pystray
-from PIL import Image, ImageDraw, ImageFont
-import uvicorn
+LOG_FILE = Path(__file__).resolve().parent / "tray.log"
 
-import main
+# У pythonw немає консолі: sys.stdout і sys.stderr — None, і логер uvicorn падає на isatty()
+# ще до старту, мовчки. Пишемо вивід у файл — заодно там видно помилки запуску.
+if sys.stdout is None or sys.stderr is None:
+    _log = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stdout or _log
+    sys.stderr = sys.stderr or _log
+
+import pystray  # noqa: E402
+from PIL import Image, ImageDraw, ImageFont  # noqa: E402
+import uvicorn  # noqa: E402
+
+import main  # noqa: E402
 
 
 HOST = "127.0.0.1"

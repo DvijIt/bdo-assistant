@@ -56,3 +56,4 @@ venv/
 snapshots/
 opcodes.local*
 вивід*.md
+backend/tray.log
