@@ -5,7 +5,12 @@ import { FormEvent, useState } from "react";
 import { AccountPage, useApiData } from "../_components/AccountPage";
 import { fetchJson, formatSeen } from "../_lib/api";
 
-type Status = { source: string; imported_at: number; counts: Record<string, number> } | null;
+type Status = {
+  source: string;
+  imported_at: number;
+  counts: Record<string, number>;
+  images?: { items: boolean; knowledge: boolean };
+} | null;
 
 const COUNT_LABELS: Record<string, string> = {
   knowledge: "знань",
@@ -59,6 +64,11 @@ export default function GameDataPage() {
           <>
             <h2>Імпортовано {formatSeen(current.imported_at)}</h2>
             <p className="inventory-muted">Папка: {current.source}</p>
+            {current.images && (
+              <p className="inventory-muted">
+                Картинки: предмети {current.images.items ? "є" : "немає"}, знання {current.images.knowledge ? "є" : "немає"}.
+              </p>
+            )}
             <dl className="account-facts account-facts-wide">
               {Object.entries(current.counts).map(([key, value]) => (
                 <div key={key}><dt>{COUNT_LABELS[key] ?? key}</dt><dd>{value.toLocaleString("uk-UA")}</dd></div>
@@ -74,16 +84,24 @@ export default function GameDataPage() {
         <div className="eyebrow">ЯК ОНОВИТИ (ПІСЛЯ ПАТЧА)</div>
         <ol className="game-data-steps">
           <li>
-            Один раз встанови <a href="https://go.dev/dl/" target="_blank" rel="noreferrer">Go</a> і extractor:
-            <code>go install github.com/idevelopthings/bdo-data-extractor@latest</code>
+            Один раз встанови <a href="https://go.dev/dl/" target="_blank" rel="noreferrer">Go</a>. Випуск
+            extractor v0.1.9 не читає клієнт 3464+ (змінились таблиці баффів і досвіду), тож збирай із локальної
+            копії з виправленнями — <code className="inline">bdo-spike\bdo-data-extractor-pr6</code> (v0.1.9 + PR #6
+            + досвід для 3483). Коли вийде новий випуск, підійде й{" "}
+            <code className="inline">go install github.com/idevelopthings/bdo-data-extractor@latest</code>.
           </li>
           <li>
-            Згенеруй таблиці зі свого клієнта (гра може бути закрита; extractor лише читає файли):
-            <code>bdo-data-extractor build --game &quot;D:\Black Desert&quot; --out D:\bdo-data --lang en</code>
-            <code>bdo-data-extractor loc --game &quot;D:\Black Desert&quot; --out D:\bdo-data --lang en</code>
+            З папки копії згенеруй таблиці зі свого клієнта (гра може бути закрита; extractor лише читає файли):
+            <code>go run . build --game D:\BlackDesert --out D:\Projects\bdo-data --lang en</code>
+            <code>go run . loc --game D:\BlackDesert --out D:\Projects\bdo-data --lang en</code>
             Шлях після <code className="inline">--game</code> — твоя папка гри.
           </li>
-          <li>Вкажи папку з результатом нижче й натисни «Імпортувати».</li>
+          <li>
+            За бажанням — картинки предметів і знань (сотні МБ; після <code className="inline">build</code>):
+            <code>go run . icons --game D:\BlackDesert --out D:\Projects\bdo-data</code>
+            <code>go run . knowledge-icons --game D:\BlackDesert --out D:\Projects\bdo-data</code>
+          </li>
+          <li>Вкажи папку з результатом нижче й натисни «Імпортувати». Картинки не копіюються — їх показуємо прямо з цієї папки.</li>
         </ol>
         <form className="inventory-form game-data-form" onSubmit={(e) => void importData(e)}>
           <label htmlFor="game-data-path">Папка з виводом extractor</label>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChangeEvent, useEffect, useState } from "react";
 
+import { GameImage } from "../_components/GameImage";
 import { API } from "../_lib/api";
 
 type ContainerKind = "inventory" | "currency" | "storage";
@@ -415,7 +416,8 @@ export default function InventoryPage() {
                               <div
                                 className={`inventory-item-icon ${holding.enhancement > 0 ? "enhanced" : ""}`}
                               >
-                                {holding.enhancement > 0 ? `+${holding.enhancement}` : "◇"}
+                                <GameImage kind="item" id={holding.item_id} size={42} fallback={holding.enhancement > 0 ? null : "◇"} />
+                                {holding.enhancement > 0 && <span className="item-enhancement">+{holding.enhancement}</span>}
                               </div>
                               <div className="inventory-item-copy">
                                 <strong>{holding.name ?? `Предмет #${holding.item_id}`}</strong>

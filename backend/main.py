@@ -6,6 +6,7 @@ import sqlite3
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -334,7 +335,32 @@ def get_workers():
 @app.get("/api/game-data")
 def get_game_data():
     with get_connection() as connection:
-        return game_data.status(connection)
+        status = game_data.status(connection)
+        if status is not None:
+            status["images"] = game_data.images(connection)
+        return status
+
+
+# Картинки з клієнта змінюються лише з патчем гри, тож браузер може тримати їх у кеші добу.
+IMAGE_HEADERS = {"Cache-Control": "max-age=86400"}
+
+
+@app.get("/api/game-data/icons/item/{item_id}")
+def get_item_icon(item_id: int):
+    with get_connection() as connection:
+        path = game_data.item_icon(connection, item_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Іконки немає")
+    return FileResponse(path, media_type="image/webp", headers=IMAGE_HEADERS)
+
+
+@app.get("/api/game-data/icons/knowledge/{knowledge_id}")
+def get_knowledge_image(knowledge_id: int):
+    with get_connection() as connection:
+        path = game_data.knowledge_image(connection, knowledge_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Картинки немає")
+    return FileResponse(path, media_type="image/webp", headers=IMAGE_HEADERS)
 
 
 class GameDataImport(BaseModel):

@@ -11,6 +11,10 @@
 - loc: таблиця 6             → персонажі за character key: типи робітників (7572), транспорт (31048), класи
 - loc: таблиця навичок робітників визначається автоматично за підтвердженими в грі назвами
 loc читається з locs/<таблиця>.json (extractor пише їх поруч) або з loc_<мова>.json.
+
+Картинки (команди extractor `icons` і `knowledge-icons`) не копіюються: бекенд віддає їх прямо з папки імпорту.
+- icons/<item_id>.webp       → іконки предметів
+- knowledge_icons/<image>    → картинки знань; шлях — поле `image` у knowledge.json (зберігаємо як knowledge_image)
 """
 
 import json
@@ -24,7 +28,7 @@ import knowledge_names
 
 SCHEMA = """
     CREATE TABLE IF NOT EXISTS game_names (
-        kind TEXT NOT NULL,          -- node, quest, character, worker_skill
+        kind TEXT NOT NULL,          -- node, quest, character, worker_skill, knowledge_image
         key TEXT NOT NULL,
         name TEXT NOT NULL,
         PRIMARY KEY (kind, key)
@@ -124,7 +128,7 @@ def _names(table: dict) -> dict[int, str]:
     return out
 
 
-def _knowledge(directory: Path) -> tuple[list[tuple], list[tuple]] | None:
+def _knowledge(directory: Path) -> tuple[list[tuple], list[tuple], dict[int, str]] | None:
     path = directory / "knowledge.json"
     if not path.is_file():
         return None
@@ -138,6 +142,7 @@ def _knowledge(directory: Path) -> tuple[list[tuple], list[tuple]] | None:
         categories.append((int(theme["key"]), _clean(theme.get("name") or str(theme["key"])), parent, position))
     positions: dict[int, int] = {}
     entries = []
+    images: dict[int, str] = {}
     for entry in data.get("entries") or []:
         theme = _urn_id(entry.get("theme"))
         name = _clean(entry.get("name") or "")
@@ -146,7 +151,9 @@ def _knowledge(directory: Path) -> tuple[list[tuple], list[tuple]] | None:
         position = positions.get(theme, 0)
         positions[theme] = position + 1
         entries.append((int(entry["key"]), theme, name, position))
-    return categories, entries
+        if isinstance(entry.get("image"), str) and entry["image"]:
+            images[int(entry["key"])] = entry["image"]
+    return categories, entries, images
 
 
 def _nodes(directory: Path) -> dict[int, str]:
@@ -207,7 +214,9 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
     counts: dict[str, int] = {}
     names: list[tuple[str, str, str]] = []
     if knowledge is not None:
-        counts.update(knowledge_names.replace(connection, *knowledge))
+        categories, entries, images = knowledge
+        counts.update(knowledge_names.replace(connection, categories, entries))
+        names += [("knowledge_image", str(k), v) for k, v in images.items()]
     # world.json знає лише ввімкнені вузли; решту назв доповнює таблиця loc.
     nodes = {**_names(loc.table(NODE_TABLE)), **_nodes(directory)}
     names +=[("node", str(k), v) for k, v in nodes.items()]
@@ -252,6 +261,43 @@ def status(connection: sqlite3.Connection) -> dict | None:
     if row is None:
         return None
     return {"source": row["source"], "imported_at": row["imported_at"], "counts": json.loads(row["counts"])}
+
+
+def images(connection: sqlite3.Connection) -> dict[str, bool]:
+    """Які картинки є в папці імпорту (extractor `icons` / `knowledge-icons`)."""
+    source = _source(connection)
+    return {
+        "items": source is not None and (source / "icons").is_dir(),
+        "knowledge": source is not None and (source / "knowledge_icons").is_dir(),
+    }
+
+
+def item_icon(connection: sqlite3.Connection, item_id: int) -> Path | None:
+    return _image(connection, "icons", f"{item_id}.webp")
+
+
+def knowledge_image(connection: sqlite3.Connection, knowledge_id: int) -> Path | None:
+    row = connection.execute(
+        "SELECT name FROM game_names WHERE kind = 'knowledge_image' AND key = ?", (str(knowledge_id),)
+    ).fetchone()
+    return _image(connection, "knowledge_icons", row[0]) if row else None
+
+
+def _source(connection: sqlite3.Connection) -> Path | None:
+    row = connection.execute("SELECT source FROM game_data_import WHERE id = 1").fetchone()
+    return Path(row[0]) if row else None
+
+
+def _image(connection: sqlite3.Connection, folder: str, relative: str) -> Path | None:
+    source = _source(connection)
+    if source is None:
+        return None
+    base = (source / folder).resolve()
+    path = (base / relative).resolve()
+    # Шлях із knowledge.json не повинен вивести за межі папки з картинками.
+    if not path.is_relative_to(base) or not path.is_file():
+        return None
+    return path
 
 
 def lookup(connection: sqlite3.Connection, kind: str) -> dict[str, str]:

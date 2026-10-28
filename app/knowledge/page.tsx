@@ -3,6 +3,7 @@
 import { ChangeEvent, useState } from "react";
 
 import { AccountPage, useApiData } from "../_components/AccountPage";
+import { GameImage } from "../_components/GameImage";
 import { fetchJson, formatSeen } from "../_lib/api";
 
 type Knowledge = {
@@ -60,6 +61,7 @@ function Category({ row, version }: { row: CategoryRow; version: number }) {
             <ul className="chip-list knowledge-entries">
               {view.entries.map((entry) => (
                 <li key={entry.knowledge_id} className={entry.gained ? undefined : "missing"} title={`ID ${entry.knowledge_id}`}>
+                  <GameImage kind="knowledge" id={entry.knowledge_id} size={28} className="knowledge-entry-image" />
                   {entry.grade && entry.grade !== "—" && <b>{entry.grade}</b>} {entry.name}
                 </li>
               ))}

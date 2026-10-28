@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { AccountPage, useApiData } from "../_components/AccountPage";
+import { GameImage } from "../_components/GameImage";
 import { fetchJson, formatSilver } from "../_lib/api";
 
 type Gear = {
@@ -113,6 +114,7 @@ export default function TransportPage() {
                       <ul className="account-gear">
                         {servant.gear.map((gear) => (
                           <li key={gear.slot}>
+                            <GameImage kind="item" id={gear.item_id} size={32} className="account-gear-icon" />
                             <div>
                               <strong>{gear.name ?? `Предмет #${gear.item_id}`}</strong>
                               <span>
