@@ -91,6 +91,14 @@ def test_single_loc_dump_is_read_when_locs_folder_is_missing(client, tmp_path):
     assert (counts["quests"], counts["characters"], counts["worker_skills"]) == (1, 1, 0)
 
 
+def test_node_names_fall_back_to_loc_when_world_json_is_missing(client, tmp_path):
+    write(tmp_path / "locs" / "29.json", {"301": {"0": "Test Town", "16777216": "This is a city."}})
+
+    counts = client.post("/api/game-data/import", json={"path": str(tmp_path)}).json()
+
+    assert counts["nodes"] == 1
+
+
 def test_folder_without_extractor_output_is_rejected(client, tmp_path):
     response = client.post("/api/game-data/import", json={"path": str(tmp_path)})
 

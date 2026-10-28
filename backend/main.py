@@ -384,8 +384,9 @@ def get_servants():
         servants = account.list_servants(connection, valuation.unit_prices(connection))
         characters = game_data.lookup(connection, "character")
         for servant in servants:
-            # Тип транспорту — character key (31048 = Epheria Caravel), не предмет.
-            servant["kind_name"] = characters.get(str(servant["kind_id"]))
+            # Тип транспорту — character key (31048 = Epheria Caravel), не предмет. Ключ — молодші
+            # 16 біт: у коней мрії старші біти зайняті (162655 → 31583 Arduanatt).
+            servant["kind_name"] = characters.get(str(servant["kind_id"] & 0xFFFF))
         return {
             "servants": servants,
             "missing_names": len(account.missing_gear_item_ids(connection)),
