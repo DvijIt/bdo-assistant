@@ -23,9 +23,8 @@ def extractor_output(tmp_path):
             {"key": 10002, "name": "Beasts (Testland)", "parent": "urn::knowledge:theme:10001"},
         ],
         "entries": [
-            {"key": 4150, "theme": "urn::knowledge:theme:10002", "name": "Baby Boar",
-             "image": "ui_artwork/ic_004150.webp"},
-            {"key": 4006, "theme": "urn::knowledge:theme:10002", "name": "Boar", "image": "../secret.webp"},
+            {"key": 4150, "theme": "urn::knowledge:theme:10002", "name": "Baby Boar"},
+            {"key": 4006, "theme": "urn::knowledge:theme:10002", "name": "Boar"},
         ],
     })
     write(out / "world.json", {"territories": [], "regions": [], "nodes": [
@@ -107,18 +106,28 @@ def test_folder_without_extractor_output_is_rejected(client, tmp_path):
     assert "bdo-data-extractor" in response.json()["detail"]
 
 
-def test_images_are_served_from_the_import_folder(client, extractor_output):
-    (extractor_output / "icons").mkdir()
-    (extractor_output / "icons" / "49706.webp").write_bytes(b"RIFF-item")
-    (extractor_output / "knowledge_icons" / "ui_artwork").mkdir(parents=True)
-    (extractor_output / "knowledge_icons" / "ui_artwork" / "ic_004150.webp").write_bytes(b"RIFF-card")
-    (extractor_output / "secret.webp").write_bytes(b"outside")
+def test_images_are_served_from_the_import_folder(client, extractor_output, tmp_path):
     client.post("/api/game-data/import", json={"path": str(extractor_output)})
+    assert client.get("/api/game-data").json()["images"] == {"items": False, "knowledge": False}
+
+    # Як після `icons` / `knowledge-icons`: файли й asset_redirects.json, без повторного імпорту.
+    icon = extractor_output / "icons" / "new_icon" / "00049706.webp"
+    icon.parent.mkdir(parents=True)
+    icon.write_bytes(b"RIFF-item")
+    card = extractor_output / "knowledge_icons" / "ui_artwork" / "ic_04150.webp"
+    card.parent.mkdir(parents=True)
+    card.write_bytes(b"RIFF-card")
+    (tmp_path / "secret.webp").write_bytes(b"outside")
+    write(extractor_output / "asset_redirects.json", {
+        "urn::item:49706": "icons/new_icon/00049706.webp",
+        "urn::knowledge:entry:4150": "knowledge_icons/ui_artwork/ic_04150.webp",
+        "urn::knowledge:entry:4006": "../secret.webp",
+    })
 
     assert client.get("/api/game-data").json()["images"] == {"items": True, "knowledge": True}
     item = client.get("/api/game-data/icons/item/49706")
     assert (item.status_code, item.content, item.headers["content-type"]) == (200, b"RIFF-item", "image/webp")
     assert client.get("/api/game-data/icons/knowledge/4150").content == b"RIFF-card"
     assert client.get("/api/game-data/icons/item/1").status_code == 404
-    # Шлях із knowledge.json не виходить за межі knowledge_icons/.
+    # Шлях з asset_redirects.json не виходить за межі папки імпорту.
     assert client.get("/api/game-data/icons/knowledge/4006").status_code == 404
