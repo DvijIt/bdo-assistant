@@ -1,4 +1,6 @@
-export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Зібраний фронт роздає сам бекенд, тож за замовчуванням API на тій самій адресі;
+// `next dev` бере адресу бекенду з .env.development.local.
+export const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, init);

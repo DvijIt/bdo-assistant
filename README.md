@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BDO Companion
 
-## Getting Started
+Особистий трекер акаунта Black Desert (EU): персонажі, робітники, транспорт, знання, інвентар і склади
+з пасивного читання власного трафіку гри, ціни — з arsha.io. Усе працює локально на ігровому ПК.
+Задум, джерела даних і межі — у [docs.md](docs.md).
 
-First, run the development server:
+## Встановлення (один раз)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Потрібні Python 3.14, Node.js (лише для збірки фронту) і [Npcap](https://npcap.com) без опції
+«Restrict Npcap driver's access to Administrators only».
+
+```powershell
+py -3.14 -m venv backend\.venv
+backend\.venv\Scripts\pip install -r backend\requirements.txt
+npm install
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Для знімків інвентаря покладіть профіль опкодів bdo-toolkit у `backend\opcodes.local`
+(або вкажіть шлях у `BDO_OPCODE_PROFILE`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Запуск
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```powershell
+cd backend
+.venv\Scripts\pythonw.exe tray.py
+```
 
-## Learn More
+Відкриється браузер на http://127.0.0.1:8000, а в треї з'явиться іконка: «Відкрити», «Агент слухає гру»,
+«Вихід». Агент вмикається одразу (`--no-agent`, щоб ні). Автозапуск з Windows:
+`.venv\Scripts\python.exe tray.py --install-autostart` (прибрати — `--remove-autostart`).
 
-To learn more about Next.js, take a look at the following resources:
+Після змін у фронті — знову `npm run build`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Розробка
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```powershell
+cd backend; .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+npm run dev
+```
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`npm run dev` бере адресу бекенду з `.env.development.local` (`NEXT_PUBLIC_API_URL=http://localhost:8000`).
+Тести: `backend\.venv\Scripts\python.exe -m pytest backend\tests`.

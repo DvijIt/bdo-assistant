@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { ChangeEvent, useEffect, useState } from "react";
 
+import { API } from "../_lib/api";
+
 type ContainerKind = "inventory" | "currency" | "storage";
 
 type Holding = {
@@ -67,8 +69,6 @@ type Snapshot = {
   storage_status: string | null;
   stacks: number;
 };
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const kindLabels: Record<ContainerKind, string> = {
   inventory: "Інвентар",

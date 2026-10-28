@@ -6,7 +6,9 @@ import sqlite3
 
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import account
 import agent as agent_module
@@ -17,6 +19,8 @@ import valuation
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "bdo_assistant.db"
+# Зібраний фронт (`npm run build` → out/); FastAPI роздає його сам, Node для запуску не потрібен.
+FRONTEND_DIR = Path(os.environ.get("BDO_FRONTEND_DIR") or BASE_DIR.parent / "out")
 
 
 @contextmanager
@@ -315,3 +319,33 @@ def get_servants():
             "servants": account.list_servants(connection, valuation.unit_prices(connection)),
             "missing_names": len(account.missing_gear_item_ids(connection)),
         }
+
+
+class FrontendFiles(StaticFiles):
+    """Статика Next з `output: "export"`. Клієнт підвантажує сегменти як
+    `__next.workers.__PAGE__.txt`, а експорт кладе їх у `__next.workers/__PAGE__.txt`."""
+
+    async def get_response(self, path: str, scope):
+        head, sep, tail = path.rpartition(".__PAGE__")
+        segment = bool(sep) and "__next." in head
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as error:
+            if error.status_code != 404 or not segment:
+                raise
+        else:
+            # З html=True відсутній файл віддається як out/404.html зі статусом 404, без винятку.
+            if response.status_code != 404 or not segment:
+                return response
+        return await super().get_response(f"{head}/__PAGE__{tail}", scope)
+
+
+def mount_frontend(target: FastAPI, directory: Path) -> bool:
+    """Роздає статичний фронт з `directory` на `/`; монтується останнім, щоб не перекривати /api."""
+    if not (directory / "index.html").is_file():
+        return False
+    target.mount("/", FrontendFiles(directory=directory, html=True), name="frontend")
+    return True
+
+
+mount_frontend(app, FRONTEND_DIR)
