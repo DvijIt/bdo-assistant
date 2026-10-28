@@ -95,6 +95,17 @@ SCHEMA = """
         updated_at REAL NOT NULL
     );
 
+    -- Списки квестів персонажа з трафіку, ключ «група-номер». Виконані — не всі (лічильник у грі
+    -- більший); open — ймовірно, відкриті, але не виконані.
+    CREATE TABLE IF NOT EXISTS quests (
+        character_id INTEGER NOT NULL,
+        group_id INTEGER NOT NULL,
+        quest_index INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('done', 'open')),
+        last_seen REAL NOT NULL,
+        PRIMARY KEY (character_id, group_id, quest_index, status)
+    );
+
     -- Стан вузлів сім'ї: invested = 1, якщо у вузол вкладено очки внеску.
     CREATE TABLE IF NOT EXISTS nodes (
         node_id INTEGER PRIMARY KEY,
@@ -147,6 +158,8 @@ class AccountWriter:
 
     def __init__(self) -> None:
         self.current_character_id: int | None = None
+        # Списки квестів приходять кількома повідомленнями після входу: перше замінює старий список.
+        self._fresh_quest_lists: set[str] = set()
 
     def save(self, connection: sqlite3.Connection, records: list) -> int:
         saved = 0
@@ -159,6 +172,7 @@ class AccountWriter:
 
     def _character_info(self, connection: sqlite3.Connection, r) -> None:
         self.current_character_id = r.character_id
+        self._fresh_quest_lists = {"done", "open"}
         connection.execute(
             """
             INSERT INTO characters (character_id, nick, family, class_id, class_name, slot, last_seen)
@@ -256,6 +270,24 @@ class AccountWriter:
             (r.available, r.total, r.experience, r.observed_at),
         )
 
+    def _quests(self, connection: sqlite3.Connection, r, status: str) -> None:
+        if self.current_character_id is None:
+            return
+        if status in self._fresh_quest_lists:
+            self._fresh_quest_lists.discard(status)
+            connection.execute("DELETE FROM quests WHERE character_id = ? AND status = ?",
+                               (self.current_character_id, status))
+        connection.executemany(
+            "INSERT OR REPLACE INTO quests VALUES (?, ?, ?, ?, ?)",
+            [(self.current_character_id, q.group, q.index, status, r.observed_at) for q in r.quests],
+        )
+
+    def _completed_quests(self, connection: sqlite3.Connection, r) -> None:
+        self._quests(connection, r, "done")
+
+    def _open_quests(self, connection: sqlite3.Connection, r) -> None:
+        self._quests(connection, r, "open")
+
     def _node_batch(self, connection: sqlite3.Connection, r) -> None:
         connection.executemany(
             """
@@ -336,6 +368,16 @@ def contribution(connection: sqlite3.Connection) -> dict | None:
     if row is None:
         return None
     return {"available": row["available"], "total": row["total"], "updated_at": row["updated_at"]}
+
+
+def quest_status(connection: sqlite3.Connection) -> dict[str, str]:
+    """Стан квестів по всій сім'ї: «група-номер» → done (виконав будь-хто) або open."""
+    status: dict[str, str] = {}
+    for group_id, quest_index, state in connection.execute("SELECT DISTINCT group_id, quest_index, status FROM quests"):
+        key = f"{group_id}-{quest_index}"
+        if state == "done" or key not in status:
+            status[key] = state
+    return status
 
 
 def invested_node_ids(connection: sqlite3.Connection) -> list[int]:

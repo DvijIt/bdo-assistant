@@ -62,6 +62,57 @@ SCHEMA = """
         npc_id INTEGER NOT NULL
     );
 
+    -- Квести з quests.json; умови взяття — сирий DSL клієнта (clearquest(904,1); getLevel()>49; …).
+    CREATE TABLE IF NOT EXISTS game_quests (
+        quest_key TEXT PRIMARY KEY,     -- «група-номер», як у трафіку
+        name TEXT NOT NULL,
+        giver TEXT,
+        objective TEXT,
+        description TEXT,
+        accept_dsl TEXT
+    );
+
+    -- Журнали пригод з adventure_journals.json: журнал → книги → сторінки-квести з бонусами сім'ї.
+    CREATE TABLE IF NOT EXISTS game_journals (
+        journal_key INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        position INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS game_journal_books (
+        journal_key INTEGER NOT NULL,
+        book_key INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        requirement TEXT,
+        position INTEGER NOT NULL,
+        PRIMARY KEY (journal_key, book_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS game_journal_pages (
+        journal_key INTEGER NOT NULL,
+        book_key INTEGER NOT NULL,
+        position INTEGER NOT NULL,
+        quest_key TEXT NOT NULL,
+        quest_name TEXT NOT NULL,
+        bonus_type INTEGER,
+        bonus_value REAL,
+        bonus_unit TEXT,
+        PRIMARY KEY (journal_key, book_key, position)
+    );
+
+    -- Усі квести, що дають постійні бонуси сім'ї (у журналах і поза ними).
+    CREATE TABLE IF NOT EXISTS game_family_bonuses (
+        quest_key TEXT NOT NULL,
+        reward_slot INTEGER NOT NULL,
+        quest_name TEXT NOT NULL,
+        giver TEXT,
+        bonus_type INTEGER NOT NULL,
+        bonus_value REAL NOT NULL,
+        bonus_unit TEXT,
+        PRIMARY KEY (quest_key, reward_slot)
+    );
+
     CREATE TABLE IF NOT EXISTS game_data_import (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         source TEXT NOT NULL,
@@ -256,6 +307,50 @@ def _ground(position) -> tuple[float | None, float | None]:
     return None, None
 
 
+def _quest_rows(directory: Path) -> list[tuple]:
+    path = directory / "quests.json"
+    if not path.is_file():
+        return []
+    rows = []
+    for quest in _read_json(path):
+        if not quest.get("id") or not quest.get("name"):
+            continue
+        rows.append((quest["id"], _clean(quest["name"]), _clean(quest.get("giver") or "") or None,
+                     _clean(quest.get("objective") or "").strip(";") or None,
+                     _clean(quest.get("desc") or "") or None,
+                     (quest.get("conditions") or {}).get("acceptDsl")))
+    return rows
+
+
+def _journal_rows(directory: Path) -> tuple[list, list, list, list] | None:
+    path = directory / "adventure_journals.json"
+    if not path.is_file():
+        return None
+    data = _read_json(path)
+    bonuses = []
+    for reward in data.get("bonuses") or []:
+        quest, bonus = reward.get("quest") or {}, reward.get("bonus") or {}
+        if quest.get("id") and bonus.get("type") is not None:
+            bonuses.append((quest["id"], reward.get("rewardSlot") or 0, _clean(quest.get("name") or quest["id"]),
+                            _clean(quest.get("giver") or "") or None, bonus["type"], bonus.get("value") or 0,
+                            bonus.get("unit")))
+    journals, books, pages = [], [], []
+    for j_pos, journal in enumerate(data.get("journals") or []):
+        jk = int(journal["key"])
+        journals.append((jk, _clean(journal.get("name") or str(jk)), _clean(journal.get("description") or "") or None,
+                         j_pos))
+        for b_pos, book in enumerate(journal.get("books") or []):
+            bk = int(book["key"])
+            books.append((jk, bk, _clean(book.get("name") or str(bk)), _clean(book.get("requirement") or "") or None,
+                          b_pos))
+            for p_pos, page in enumerate(book.get("pages") or []):
+                quest = page.get("quest") or {}
+                bonus = page.get("bonus") or {}
+                pages.append((jk, bk, p_pos, quest.get("id"), _clean(quest.get("name") or quest.get("id") or ""),
+                              bonus.get("type"), bonus.get("value"), bonus.get("unit")))
+    return journals, books, pages, bonuses
+
+
 def _npcs(directory: Path) -> list[tuple]:
     """NPC, що стоять у світі: (id, ім'я, титул, район, x, z) — за першою точкою з npcs.json."""
     path = directory / "npcs.json"
@@ -332,7 +427,8 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
         raise GameDataError(f"Папки не знайдено: {directory}")
     loc = _Loc(directory)
     knowledge = _knowledge(directory)
-    if knowledge is None and not loc.available() and not (directory / "world.json").is_file():
+    outputs = ("world.json", "quests.json", "adventure_journals.json")
+    if knowledge is None and not loc.available() and not any((directory / name).is_file() for name in outputs):
         raise GameDataError(
             "У папці немає виводу bdo-data-extractor (knowledge.json, world.json, locs/ або loc_<мова>.json)")
 
@@ -350,6 +446,20 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             world_nodes,
         )
+    quests = _quest_rows(directory)
+    if quests:
+        connection.execute("DELETE FROM game_quests")
+        connection.executemany("INSERT OR REPLACE INTO game_quests VALUES (?, ?, ?, ?, ?, ?)", quests)
+        counts["quest_details"] = len(quests)
+    journals = _journal_rows(directory)
+    if journals:
+        for table in ("game_journals", "game_journal_books", "game_journal_pages", "game_family_bonuses"):
+            connection.execute(f"DELETE FROM {table}")
+        connection.executemany("INSERT OR REPLACE INTO game_family_bonuses VALUES (?, ?, ?, ?, ?, ?, ?)", journals[3])
+        connection.executemany("INSERT INTO game_journals VALUES (?, ?, ?, ?)", journals[0])
+        connection.executemany("INSERT INTO game_journal_books VALUES (?, ?, ?, ?, ?)", journals[1])
+        connection.executemany("INSERT INTO game_journal_pages VALUES (?, ?, ?, ?, ?, ?, ?, ?)", journals[2])
+        counts["journals"] = len(journals[0])
     npcs = _npcs(directory)
     if npcs:
         connection.execute("DELETE FROM game_npcs")
@@ -474,6 +584,96 @@ def node_details(connection: sqlite3.Connection, node_ids: list[int]) -> dict[in
             "contribution": row["contribution"],
             "products": [items.get(i, f"#{i}") for i in json.loads(row["products"])],
         }
+    return out
+
+
+# Бонуси сім'ї за сторінки журналів (тип з extractor, src/model/enums/family_stat_types.yml).
+FAMILY_STATS = {
+    0: "Усі AP", 1: "Усі DP", 2: "Макс. HP", 3: "Макс. MP", 4: "Макс. витривалість", 5: "Вантажопідйомність",
+    6: "Слоти інвентаря", 7: "Влучність", 8: "Ухилення", 9: "Шанс заточування",
+    10: "Додатковий ліміт шансу заточування", 11: "Ліміт стаку шансу заточування",
+}
+QUEST_REQUIRED = re.compile(r"(?<![!\w])clearquest\((\d+),\s*(\d+)\)", re.IGNORECASE)
+DISABLED_LEVEL = 100
+QUEST_LEVEL = re.compile(r"getLevel\(\)\s*(>=|>)\s*(\d+)", re.IGNORECASE)
+
+
+def _bonus(type_: int | None, value: float | None, unit: str | None) -> dict | None:
+    if type_ is None or value is None:
+        return None
+    return {"type": type_, "label": FAMILY_STATS.get(type_, f"Бонус #{type_}"), "value": value, "unit": unit}
+
+
+def journals(connection: sqlite3.Connection, status: dict[str, str]) -> list[dict]:
+    """Журнали пригод з прогресом: сторінка виконана, відкрита або ще недоступна."""
+    books: dict[int, list] = {}
+    for book in connection.execute("SELECT * FROM game_journal_books ORDER BY journal_key, position"):
+        books.setdefault(book["journal_key"], []).append({
+            "book_key": book["book_key"], "name": book["name"], "requirement": book["requirement"], "pages": [],
+        })
+    index = {(j, b["book_key"]): b for j, items in books.items() for b in items}
+    for page in connection.execute("SELECT * FROM game_journal_pages ORDER BY journal_key, book_key, position"):
+        book = index.get((page["journal_key"], page["book_key"]))
+        if book is not None:
+            book["pages"].append({
+                "quest_key": page["quest_key"], "name": page["quest_name"],
+                "status": status.get(page["quest_key"], "locked"),
+                "bonus": _bonus(page["bonus_type"], page["bonus_value"], page["bonus_unit"]),
+            })
+    out = []
+    for journal in connection.execute("SELECT * FROM game_journals ORDER BY position"):
+        items = books.get(journal["journal_key"], [])
+        pages = [p for b in items for p in b["pages"]]
+        for book in items:
+            book["done"] = sum(p["status"] == "done" for p in book["pages"])
+        out.append({
+            "journal_key": journal["journal_key"], "name": journal["name"], "description": journal["description"],
+            "done": sum(p["status"] == "done" for p in pages), "total": len(pages), "books": items,
+        })
+    return out
+
+
+def family_bonuses(connection: sqlite3.Connection, status: dict[str, str]) -> list[dict]:
+    """Постійні бонуси сім'ї за квести: усього, отримано (квест виконано) і що ще лишилось узяти."""
+    totals: dict[int, dict] = {}
+    for row in connection.execute("SELECT * FROM game_family_bonuses ORDER BY bonus_type, quest_name"):
+        bonus = _bonus(row["bonus_type"], row["bonus_value"], row["bonus_unit"])
+        total = totals.setdefault(row["bonus_type"], {**bonus, "value": 0, "gained": 0, "missing": []})
+        total["value"] += row["bonus_value"]
+        if status.get(row["quest_key"]) == "done":
+            total["gained"] += row["bonus_value"]
+        else:
+            total["missing"].append({"quest_key": row["quest_key"], "name": row["quest_name"], "giver": row["giver"],
+                                     "value": row["bonus_value"], "status": status.get(row["quest_key"], "locked")})
+    return list(totals.values())
+
+
+def search_quests(connection: sqlite3.Connection, status: dict[str, str], text: str, limit: int = 60) -> list[dict]:
+    """Квести за назвою, NPC чи ключем, з вимогами: попередні квести й рівень з умов взяття."""
+    pattern = f"%{text.strip()}%"
+    rows = connection.execute(
+        "SELECT * FROM game_quests WHERE name LIKE ? OR giver LIKE ? OR quest_key = ? ORDER BY name LIMIT ?",
+        (pattern, pattern, text.strip(), limit),
+    ).fetchall()
+    names = dict(connection.execute("SELECT quest_key, name FROM game_quests").fetchall()) if rows else {}
+    out = []
+    for row in rows:
+        dsl = row["accept_dsl"] or ""
+        required = [k for k in dict.fromkeys(f"{g}-{i}" for g, i in QUEST_REQUIRED.findall(dsl))
+                    if k != row["quest_key"]]
+        levels = [int(n) + (1 if op == ">" else 0) for op, n in QUEST_LEVEL.findall(dsl)]
+        out.append({
+            "quest_key": row["quest_key"], "name": row["name"], "giver": row["giver"],
+            "objective": row["objective"], "description": row["description"],
+            "status": status.get(row["quest_key"], "unknown"),
+            "min_level": min(levels) if levels else None,
+            # Умова «рівень понад 99» недосяжна: так клієнт вимикає старі й подієві квести.
+            "disabled": bool(levels) and min(levels) >= DISABLED_LEVEL,
+            # «<or>» у DSL розділяє варіанти, тож попередні квести — це можливі, а не всі обов'язкові.
+            "alternatives": "<or>" in dsl,
+            "requires": [{"quest_key": k, "name": names.get(k, k), "status": status.get(k, "unknown")}
+                         for k in required[:12]],
+        })
     return out
 
 

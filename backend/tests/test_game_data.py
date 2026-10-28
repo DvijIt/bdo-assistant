@@ -3,8 +3,9 @@ import json
 import pytest
 
 pytest.importorskip("bdo_toolkit.account")
-from bdo_toolkit.account import (CharacterInfo, Contribution, GearItem, KnowledgeBatch, KnowledgeEntry,  # noqa: E402
-                                 NodeBatch, NodeState, Servant, SkillPoints, Worker)
+from bdo_toolkit.account import (CharacterInfo, CompletedQuests, Contribution, GearItem,  # noqa: E402
+                                 KnowledgeBatch, KnowledgeEntry, NodeBatch, NodeState, OpenQuests, QuestKey,
+                                 Servant, SkillPoints, Worker)
 
 import main  # noqa: E402
 
@@ -236,3 +237,50 @@ def test_map_places_nodes_and_npcs_for_unlearned_knowledge(client, tmp_path):
 def test_map_is_null_until_the_tiles_are_generated(client, extractor_output):
     client.post("/api/game-data/import", json={"path": str(extractor_output)})
     assert client.get("/api/map").json() is None
+
+
+def test_quests_and_adventure_journals(client, tmp_path):
+    write(tmp_path / "quests.json", [
+        {"id": "748-1", "name": "Hey There Big Fellow!", "giver": "Igor Bartali", "objective": "Defeat the giant;",
+         "conditions": {"acceptDsl": "getLevel()>49;clearquest(747,2);!clearquest(1,1);"}},
+        {"id": "748-2", "name": "Second Page", "giver": "Igor Bartali", "conditions": {"acceptDsl": ""}},
+        {"id": "747-2", "name": "Before It", "giver": "Igor Bartali"},
+    ])
+    page = lambda key, name, bonus=None: {"quest": {"id": key, "name": name}, **({"bonus": bonus} if bonus else {})}
+    write(tmp_path / "adventure_journals.json", {
+        "journals": [{"key": 1, "name": "Test Adventures", "books": [{
+            "key": 1, "name": "Vol. I", "requirement": "Reach Lv. 51",
+            "pages": [page("748-1", "Hey There Big Fellow!", {"type": 0, "value": 1}), page("748-2", "Second Page"),
+                      page("748-3", "Third Page")],
+        }]}],
+        "bonuses": [
+            {"quest": {"id": "748-1", "name": "Hey There Big Fellow!"}, "rewardSlot": 1, "bonus": {"type": 0, "value": 1}},
+            {"quest": {"id": "900-1", "name": "Outside Journal"}, "rewardSlot": 1, "bonus": {"type": 0, "value": 2}},
+        ],
+    })
+    client.post("/api/game-data/import", json={"path": str(tmp_path)})
+    save([
+        CharacterInfo(1.0, 7, "Mobix", "Testfam", 13, 1, 1, 1),
+        CompletedQuests(1.0, (QuestKey(748, 1), QuestKey(747, 2))),
+        OpenQuests(1.0, (QuestKey(748, 2),)),
+        # Новий вхід тим самим персонажем замінює списки, а не дописує до старих.
+        CharacterInfo(2.0, 7, "Mobix", "Testfam", 13, 1, 1, 1),
+        CompletedQuests(2.0, (QuestKey(748, 1), QuestKey(747, 2))),
+        OpenQuests(2.0, (QuestKey(748, 2),)),
+        CharacterInfo(3.0, 8, "Alt", "Testfam", 2, 1, 1, 1),
+        CompletedQuests(3.0, (QuestKey(748, 2),)),
+    ])
+
+    data = client.get("/api/journals").json()
+    (journal,) = data["journals"]
+    assert (journal["done"], journal["total"]) == (2, 3)  # 748-2 виконав інший персонаж
+    assert [p["status"] for p in journal["books"][0]["pages"]] == ["done", "done", "locked"]
+    (ap,) = data["bonuses"]
+    assert (ap["label"], ap["value"], ap["gained"]) == ("Усі AP", 3, 1)
+    assert [m["name"] for m in ap["missing"]] == ["Outside Journal"]
+
+    found = client.get("/api/quests", params={"q": "Big Fellow"}).json()
+    assert (found["done"], found["open"]) == (3, 0)
+    (quest,) = found["quests"]
+    assert (quest["status"], quest["min_level"], quest["objective"]) == ("done", 50, "Defeat the giant")
+    assert quest["requires"] == [{"quest_key": "747-2", "name": "Before It", "status": "done"}]

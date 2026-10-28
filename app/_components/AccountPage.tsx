@@ -17,6 +17,8 @@ const SECTIONS: { label: string; pages: { href: string; icon: string; label: str
       { href: "/nodes/", icon: "⌖", label: "Вузли" },
       { href: "/transport/", icon: "⚓", label: "Транспорт" },
       { href: "/knowledge/", icon: "✦", label: "Знання" },
+      { href: "/quests/", icon: "❖", label: "Квести" },
+      { href: "/journals/", icon: "❦", label: "Журнали пригод" },
       { href: "/map/", icon: "⊕", label: "Карта" },
     ],
   },

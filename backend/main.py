@@ -340,6 +340,31 @@ def get_nodes():
     return {"contribution": points, "nodes": nodes}
 
 
+@app.get("/api/journals")
+def get_journals():
+    """Журнали пригод з прогресом по всій сім'ї (за списками квестів з трафіку)."""
+    with get_connection() as connection:
+        status = account.quest_status(connection)
+        journal_list = game_data.journals(connection, status)
+        bonuses = game_data.family_bonuses(connection, status)
+    return {"journals": journal_list, "bonuses": bonuses, "quests_known": bool(status)}
+
+
+@app.get("/api/quests")
+def get_quests(q: str = ""):
+    """Пошук квестів; без запиту — лише підсумок."""
+    with get_connection() as connection:
+        status = account.quest_status(connection)
+        found = game_data.search_quests(connection, status, q) if len(q.strip()) >= 2 else []
+        characters = connection.execute("SELECT COUNT(DISTINCT character_id) FROM quests").fetchone()[0]
+    return {
+        "characters": characters,
+        "done": sum(s == "done" for s in status.values()),
+        "open": sum(s == "open" for s in status.values()),
+        "quests": found,
+    }
+
+
 @app.get("/api/map")
 def get_map():
     """Шари карти, вузли й NPC для ще не зібраних знань; null, доки плиток карти немає."""
