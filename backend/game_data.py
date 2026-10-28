@@ -40,7 +40,7 @@ SCHEMA = """
 
 QUEST_TABLE = 18
 ENTITY_TABLE = 6
-# Назви вузлів і міст за waypoint id (301 → Heidel); резерв, коли build не записав world.json.
+# Назви вузлів і міст за waypoint id (301 → Heidel); є й тоді, коли build не записав world.json.
 NODE_TABLE = 29
 FIELD_NAME = 0
 # Назви навичок робітників, звірені в грі; за ними шукаємо таблицю навичок у loc.
@@ -208,7 +208,8 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
     names: list[tuple[str, str, str]] = []
     if knowledge is not None:
         counts.update(knowledge_names.replace(connection, *knowledge))
-    nodes = _nodes(directory) or _names(loc.table(NODE_TABLE))
+    # world.json знає лише ввімкнені вузли; решту назв доповнює таблиця loc.
+    nodes = {**_names(loc.table(NODE_TABLE)), **_nodes(directory)}
     names +=[("node", str(k), v) for k, v in nodes.items()]
     counts["nodes"] = len(nodes)
     items = _items(directory)
