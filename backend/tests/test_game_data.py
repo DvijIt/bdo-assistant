@@ -189,3 +189,46 @@ def test_contribution_skill_points_and_invested_nodes(client, extractor_output):
     assert farming == {"node_id": 135, "name": "Test Farming", "territory": "Testland", "manager_id": 301,
                        "manager_name": "Testheim", "contribution": 1, "products": ["Test Prow"]}
     assert [n["node_id"] for n in data["nodes"]] == [135, 301]
+
+
+def test_map_places_nodes_and_npcs_for_unlearned_knowledge(client, tmp_path):
+    write(tmp_path / "knowledge.json", {
+        "themes": [{"key": 1, "name": "Characters"}],
+        "entries": [
+            {"key": 10, "theme": "urn::knowledge:theme:1", "name": "Mira", "character": "urn::character:mira",
+             "acquisition": "Can be obtained through [Dialogue]\nMira"},
+            {"key": 11, "theme": "urn::knowledge:theme:1", "name": "Known", "character": "urn::character:mira"},
+        ],
+    })
+    write(tmp_path / "characters.json", [{"urn": "urn::character:mira", "entities": [{"id": 500}, {"id": 501}]}])
+    write(tmp_path / "npcs.json", [
+        {"id": 501, "name": "Mira", "title": "<Test Merchant>",
+         "spawns": [{"regionName": "Testheim", "pos": [1000.0, 50.0, 2000.0]}]},
+        {"id": 600, "name": "Nobody", "spawns": []},
+    ])
+    write(tmp_path / "world.json", {"territories": [], "nodes": [
+        {"key": 301, "name": "Testheim", "enabled": True, "position": [3000.0, 0.0, 4000.0]},
+    ]})
+    (tmp_path / "regionmaps").mkdir()
+    (tmp_path / "regionmaps" / "map.png").write_bytes(b"PNG")
+    write(tmp_path / "worldmap.json", {"image": "regionmaps/map.png", "width": 100, "height": 100,
+                                       "transform": {"px": [0.01, 0, 10], "py": [0, -0.01, 90]}})
+    save([KnowledgeBatch(1.0, 0, (KnowledgeEntry(11, 1),)), NodeBatch(1.0, (NodeState(301, True),))])
+    counts = client.post("/api/game-data/import", json={"path": str(tmp_path)}).json()
+    assert (counts["npcs"], counts["knowledge_npcs"]) == (1, 2)
+
+    data = client.get("/api/map").json()
+    assert data["image"] == {"width": 100, "height": 100}
+    assert data["nodes"] == [{"node_id": 301, "name": "Testheim", "territory": None, "sub": False,
+                              "invested": True, "x": 40.0, "y": 50.0}]
+    (npc,) = data["npcs"]
+    assert (npc["name"], npc["title"], npc["region"], npc["x"], npc["y"]) == ("Mira", "Test Merchant", "Testheim",
+                                                                             20.0, 70.0)
+    assert [k["name"] for k in npc["knowledge"]] == ["Mira"]  # «Known» уже зібрано
+    assert client.get("/api/game-data/map-image").content == b"PNG"
+
+
+def test_map_is_null_until_the_region_map_is_generated(client, extractor_output):
+    client.post("/api/game-data/import", json={"path": str(extractor_output)})
+    assert client.get("/api/map").json() is None
+    assert client.get("/api/game-data/map-image").status_code == 404

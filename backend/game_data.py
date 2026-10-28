@@ -41,7 +41,34 @@ SCHEMA = """
         territory TEXT,
         manager_id INTEGER,
         contribution INTEGER,
-        products TEXT NOT NULL          -- JSON-список item_id
+        products TEXT NOT NULL,         -- JSON-список item_id
+        x REAL,                         -- світові координати (см); висоту не зберігаємо
+        z REAL
+    );
+
+    -- NPC з npcs.json з першою точкою, де вони стоять у світі.
+    CREATE TABLE IF NOT EXISTS game_npcs (
+        npc_id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        title TEXT,
+        region TEXT,
+        x REAL NOT NULL,
+        z REAL NOT NULL
+    );
+
+    -- Знання, яке дає розмова з NPC (знання → персонаж → NPC, що стоїть у світі).
+    CREATE TABLE IF NOT EXISTS knowledge_npc (
+        knowledge_id INTEGER PRIMARY KEY,
+        npc_id INTEGER NOT NULL
+    );
+
+    -- Карта регіонів (extractor `regionmaps`) і перерахунок світових координат у пікселі.
+    CREATE TABLE IF NOT EXISTS game_map (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        image TEXT NOT NULL,
+        width INTEGER NOT NULL,
+        height INTEGER NOT NULL,
+        transform TEXT NOT NULL         -- {"px": [a, b, c], "py": [a, b, c]}: px = a·x + b·z + c
     );
 
     CREATE TABLE IF NOT EXISTS game_data_import (
@@ -74,6 +101,10 @@ class GameDataError(ValueError):
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(SCHEMA)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(game_nodes)")}
+    for column in ("x", "z"):
+        if column not in columns:
+            connection.execute(f"ALTER TABLE game_nodes ADD COLUMN {column} REAL")
 
 
 def _clean(text: str) -> str:
@@ -221,9 +252,62 @@ def _world(directory: Path) -> tuple[dict[int, str], list[tuple]]:
         key = int(node["key"])
         names[key] = _clean(node["name"])
         products = [i for i in (_urn_id(u) for u in (node.get("products") or {}).get("urns") or []) if i]
+        x, z = _ground(node.get("position"))
         rows.append((key, names[key], territories.get(_urn_id(node.get("territory"))) or None,
-                     _urn_id(node.get("managerNode")), node.get("contribution"), json.dumps(products)))
+                     _urn_id(node.get("managerNode")), node.get("contribution"), json.dumps(products), x, z))
     return names, rows
+
+
+def _ground(position) -> tuple[float | None, float | None]:
+    """(x, z) зі світової точки extractor [x, висота, z]."""
+    if isinstance(position, list) and len(position) == 3:
+        return float(position[0]), float(position[2])
+    return None, None
+
+
+def _npcs(directory: Path) -> list[tuple]:
+    """NPC, що стоять у світі: (id, ім'я, титул, район, x, z) — за першою точкою з npcs.json."""
+    path = directory / "npcs.json"
+    if not path.is_file():
+        return []
+    rows = []
+    for npc in _read_json(path):
+        spawn = next((s for s in npc.get("spawns") or [] if _ground(s.get("pos"))[0] is not None), None)
+        if spawn is None or not npc.get("name"):
+            continue
+        x, z = _ground(spawn["pos"])
+        title = _clean(npc.get("title") or "").strip("<>") or None
+        rows.append((int(npc["id"]), _clean(npc["name"]), title, spawn.get("regionName"), x, z))
+    return rows
+
+
+def _knowledge_npcs(directory: Path, placed: set[int]) -> list[tuple[int, int]]:
+    """(знання, NPC): знання посилається на персонажа, а той — на NPC, які стоять у світі."""
+    knowledge, characters = directory / "knowledge.json", directory / "characters.json"
+    if not knowledge.is_file() or not characters.is_file():
+        return []
+    entities = {
+        c["urn"]: [e["id"] for e in c.get("entities") or [] if e.get("id") in placed]
+        for c in _read_json(characters) if c.get("urn")
+    }
+    links = []
+    for entry in _read_json(knowledge).get("entries") or []:
+        npcs = entities.get(entry.get("character")) or []
+        if npcs:
+            links.append((int(entry["key"]), npcs[0]))
+    return links
+
+
+def _region_map(directory: Path) -> tuple | None:
+    """Карта регіонів з worldmap.json, якщо її картинку вже згенеровано (`regionmaps`)."""
+    path = directory / "worldmap.json"
+    if not path.is_file():
+        return None
+    data = _read_json(path)
+    image = data.get("image")
+    if not isinstance(image, str) or not (directory / image).is_file():
+        return None
+    return image, int(data["width"]), int(data["height"]), json.dumps(data["transform"])
 
 
 def _items(directory: Path) -> list[tuple]:
@@ -282,7 +366,23 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
     nodes = {**_names(loc.table(NODE_TABLE)), **world_names}
     if world_nodes:
         connection.execute("DELETE FROM game_nodes")
-        connection.executemany("INSERT INTO game_nodes VALUES (?, ?, ?, ?, ?, ?)", world_nodes)
+        connection.executemany(
+            "INSERT INTO game_nodes (node_id, name, territory, manager_id, contribution, products, x, z)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            world_nodes,
+        )
+    npcs = _npcs(directory)
+    if npcs:
+        connection.execute("DELETE FROM game_npcs")
+        connection.executemany("INSERT INTO game_npcs VALUES (?, ?, ?, ?, ?, ?)", npcs)
+        links = _knowledge_npcs(directory, {row[0] for row in npcs})
+        connection.execute("DELETE FROM knowledge_npc")
+        connection.executemany("INSERT OR IGNORE INTO knowledge_npc VALUES (?, ?)", links)
+        counts.update(npcs=len(npcs), knowledge_npcs=len(links))
+    region_map = _region_map(directory)
+    connection.execute("DELETE FROM game_map")
+    if region_map:
+        connection.execute("INSERT INTO game_map VALUES (1, ?, ?, ?, ?)", region_map)
     names +=[("node", str(k), v) for k, v in nodes.items()]
     counts["nodes"] = len(nodes)
     items = _items(directory)
@@ -400,6 +500,73 @@ def node_details(connection: sqlite3.Connection, node_ids: list[int]) -> dict[in
             "products": [items.get(i, f"#{i}") for i in json.loads(row["products"])],
         }
     return out
+
+
+def _to_image(transform: dict, x: float, z: float) -> tuple[float, float]:
+    a, b, c = transform["px"]
+    d, e, f = transform["py"]
+    return a * x + b * z + c, d * x + e * z + f
+
+
+def map_data(connection: sqlite3.Connection, invested: set[int], gained: set[int]) -> dict | None:
+    """Карта: усі вузли (вкладені позначено) і NPC, у яких можна взяти ще не зібрані знання.
+    Координати — у пікселях картинки карти. None, доки карту не згенеровано й не імпортовано."""
+    row = connection.execute("SELECT * FROM game_map WHERE id = 1").fetchone()
+    if row is None:
+        return None
+    transform = json.loads(row["transform"])
+
+    def inside(px: float, py: float) -> bool:
+        return 0 <= px <= row["width"] and 0 <= py <= row["height"]
+
+    nodes = []
+    for node in connection.execute("SELECT node_id, name, territory, manager_id, x, z FROM game_nodes "
+                                   "WHERE x IS NOT NULL"):
+        px, py = _to_image(transform, node["x"], node["z"])
+        if inside(px, py):
+            nodes.append({"node_id": node["node_id"], "name": node["name"], "territory": node["territory"],
+                          "sub": node["manager_id"] is not None, "invested": node["node_id"] in invested,
+                          "x": round(px, 1), "y": round(py, 1)})
+
+    npcs: dict[int, dict] = {}
+    for link in connection.execute(
+        """
+        SELECT k.knowledge_id, n.name AS knowledge, n.acquisition, c.name AS category,
+               p.npc_id, p.name, p.title, p.region, p.x, p.z
+        FROM knowledge_npc k
+        JOIN knowledge_names n USING (knowledge_id)
+        JOIN knowledge_categories c USING (category_id)
+        JOIN game_npcs p USING (npc_id)
+        """
+    ):
+        if link["knowledge_id"] in gained:
+            continue
+        px, py = _to_image(transform, link["x"], link["z"])
+        if not inside(px, py):
+            continue
+        npc = npcs.setdefault(link["npc_id"], {
+            "npc_id": link["npc_id"], "name": link["name"], "title": link["title"], "region": link["region"],
+            "x": round(px, 1), "y": round(py, 1), "knowledge": [],
+        })
+        npc["knowledge"].append({"knowledge_id": link["knowledge_id"], "name": link["knowledge"],
+                                 "category": link["category"], "acquisition": link["acquisition"]})
+    return {
+        "image": {"width": row["width"], "height": row["height"]},
+        "nodes": nodes,
+        "npcs": sorted(npcs.values(), key=lambda n: (-len(n["knowledge"]), n["name"])),
+    }
+
+
+def map_image(connection: sqlite3.Connection) -> Path | None:
+    source = _source(connection)
+    row = connection.execute("SELECT image FROM game_map WHERE id = 1").fetchone()
+    if source is None or row is None:
+        return None
+    base = source.resolve()
+    path = (base / row["image"]).resolve()
+    if not path.is_relative_to(base) or not path.is_file():
+        return None
+    return path
 
 
 def lookup(connection: sqlite3.Connection, kind: str) -> dict[str, str]:
