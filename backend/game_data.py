@@ -635,6 +635,9 @@ def journals(connection: sqlite3.Connection, status: dict[str, str]) -> list[dic
 
 def family_bonuses(connection: sqlite3.Connection, status: dict[str, str]) -> list[dict]:
     """Постійні бонуси сім'ї за квести: усього, отримано (квест виконано) і що ще лишилось узяти."""
+    # Квест бонусу може бути сторінкою журналу — тоді сторінка посилається на нього.
+    pages = {row[0]: (row[1], row[2]) for row in connection.execute(
+        "SELECT quest_key, journal_key, book_key FROM game_journal_pages")}
     totals: dict[int, dict] = {}
     for row in connection.execute("SELECT * FROM game_family_bonuses ORDER BY bonus_type, quest_name"):
         bonus = _bonus(row["bonus_type"], row["bonus_value"], row["bonus_unit"])
@@ -643,8 +646,10 @@ def family_bonuses(connection: sqlite3.Connection, status: dict[str, str]) -> li
         if status.get(row["quest_key"]) == "done":
             total["gained"] += row["bonus_value"]
         else:
+            journal, book = pages.get(row["quest_key"], (None, None))
             total["missing"].append({"quest_key": row["quest_key"], "name": row["quest_name"], "giver": row["giver"],
-                                     "value": row["bonus_value"], "status": status.get(row["quest_key"], "locked")})
+                                     "value": row["bonus_value"], "status": status.get(row["quest_key"], "locked"),
+                                     "journal_key": journal, "book_key": book})
     return list(totals.values())
 
 

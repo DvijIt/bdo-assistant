@@ -16,7 +16,15 @@ type Journal = { journal_key: number; name: string; description: string | null; 
 
 type FamilyBonus = Bonus & {
   gained: number;
-  missing: { quest_key: string; name: string; giver: string | null; value: number; status: Status }[];
+  missing: {
+    quest_key: string;
+    name: string;
+    giver: string | null;
+    value: number;
+    status: Status;
+    journal_key: number | null;
+    book_key: number | null;
+  }[];
 };
 
 type Journals = { journals: Journal[]; bonuses: FamilyBonus[]; quests_known: boolean };
@@ -26,6 +34,24 @@ const STATUS_LABELS: Record<Status, string> = { done: "виконано", open: 
 function amount(value: number, unit: string | null) {
   const text = Number.isInteger(value) ? value.toLocaleString("uk-UA") : value.toFixed(1);
   return unit ? `${text} ${unit}` : text;
+}
+
+function complete(done: number, total: number) {
+  return total > 0 && done >= total ? " complete" : "";
+}
+
+/** Розгортає журнал і книгу зі сторінкою та прокручує до неї, ненадовго підсвітивши. */
+function openPage(journal: number, book: number, quest: string) {
+  for (const id of [`journal-${journal}`, `book-${journal}-${book}`]) {
+    const details = document.getElementById(id);
+    if (details instanceof HTMLDetailsElement) details.open = true;
+  }
+  const page = document.getElementById(`page-${quest}`);
+  if (!page) return;
+  page.scrollIntoView({ behavior: "smooth", block: "center" });
+  page.classList.remove("flash");
+  void page.offsetWidth; // перезапуск анімації при повторному кліку
+  page.classList.add("flash");
 }
 
 function Progress({ done, total }: { done: number; total: number }) {
@@ -69,11 +95,16 @@ export default function JournalsPage() {
               <ul className="journal-bonuses">
                 {data.bonuses.map((bonus) => (
                   <li key={bonus.type}>
-                    <details>
+                    <details className={complete(bonus.gained, bonus.value).trim() || undefined}>
                       <summary>
                         <strong>{bonus.label}</strong>
-                        <span className={bonus.gained >= bonus.value ? "journal-complete" : undefined}>
-                          {amount(bonus.gained, bonus.unit)} / {amount(bonus.value, bonus.unit)}
+                        <span className="journal-bonus-total">
+                          <span className="progress-track">
+                            <span className="progress-fill" style={{ width: `${bonus.value ? (100 * bonus.gained) / bonus.value : 0}%` }} />
+                          </span>
+                          <span className={bonus.gained >= bonus.value ? "journal-complete" : undefined}>
+                            {amount(bonus.gained, bonus.unit)} / {amount(bonus.value, bonus.unit)}
+                          </span>
                         </span>
                       </summary>
                       {bonus.missing.length === 0 ? (
@@ -83,8 +114,25 @@ export default function JournalsPage() {
                           {bonus.missing.map((quest) => (
                             <li key={quest.quest_key}>
                               <span>
-                                {quest.name}
-                                {quest.giver && <small>{quest.giver}</small>}
+                                {quest.journal_key !== null && quest.book_key !== null ? (
+                                  <a
+                                    href={`#page-${quest.quest_key}`}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      openPage(quest.journal_key!, quest.book_key!, quest.quest_key);
+                                    }}
+                                  >
+                                    {quest.name}
+                                  </a>
+                                ) : (
+                                  <Link href={`/quests/?q=${encodeURIComponent(quest.name)}`}>{quest.name}</Link>
+                                )}
+                                <small>
+                                  {quest.giver}
+                                  {quest.journal_key !== null
+                                    ? ` · ${journals.find((j) => j.journal_key === quest.journal_key)?.name ?? "журнал"}`
+                                    : " · не з журналу"}
+                                </small>
                               </span>
                               <span className={`journal-status ${quest.status}`}>
                                 +{amount(quest.value, bonus.unit)} · {STATUS_LABELS[quest.status]}
@@ -108,7 +156,11 @@ export default function JournalsPage() {
             <div className="eyebrow">ЖУРНАЛИ</div>
             <div className="knowledge-tree">
               {journals.map((journal) => (
-                <details className="knowledge-category" key={journal.journal_key}>
+                <details
+                  className={`knowledge-category${complete(journal.done, journal.total)}`}
+                  key={journal.journal_key}
+                  id={`journal-${journal.journal_key}`}
+                >
                   <summary>
                     <strong>{journal.name}</strong>
                     <Progress done={journal.done} total={journal.total} />
@@ -116,7 +168,11 @@ export default function JournalsPage() {
                   <div className="knowledge-children">
                     {journal.description && <p className="inventory-muted">{journal.description}</p>}
                     {journal.books.map((book) => (
-                      <details className="knowledge-category" key={book.book_key}>
+                      <details
+                        className={`knowledge-category${complete(book.done, book.pages.length)}`}
+                        key={book.book_key}
+                        id={`book-${journal.journal_key}-${book.book_key}`}
+                      >
                         <summary>
                           <strong>{book.name}</strong>
                           <Progress done={book.done} total={book.pages.length} />
@@ -125,7 +181,7 @@ export default function JournalsPage() {
                           {book.requirement && <p className="journal-requirement">{book.requirement}</p>}
                           <ol className="journal-pages">
                             {book.pages.map((page) => (
-                              <li key={page.quest_key} className={page.status}>
+                              <li key={page.quest_key} className={page.status} id={`page-${page.quest_key}`}>
                                 <span className="journal-mark" aria-hidden="true">
                                   {page.status === "done" ? "✓" : page.status === "open" ? "•" : "○"}
                                 </span>

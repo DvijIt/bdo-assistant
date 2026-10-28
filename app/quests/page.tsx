@@ -31,6 +31,14 @@ export default function QuestsPage() {
   const [results, setResults] = useState<{ query: string; quests: Quest[] } | null>(null);
   const [error, setError] = useState("");
 
+  // Посилання на кшталт /quests/?q=… (з журналів) одразу запускає пошук. Сторінка статична,
+  // тож параметр видно лише в браузері.
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("q");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- значення з адреси доступне лише після гідрації
+    if (fromUrl) setQuery(fromUrl);
+  }, []);
+
   // Шукаємо з невеликою паузою після введення, щоб не питати бекенд на кожну літеру.
   useEffect(() => {
     const text = query.trim();

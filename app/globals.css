@@ -422,6 +422,7 @@ h2 {
 }
 
 .progress-track {
+  display: block;
   height: 5px;
   background: #292d33;
   border-radius: 9px;
@@ -429,6 +430,7 @@ h2 {
 }
 
 .progress-fill {
+  display: block;
   height: 100%;
   background: var(--gold);
   transition: width 0.25s ease;
@@ -1833,5 +1835,63 @@ a.nav-item {
     order: 3;
     width: 100%;
     padding-left: 24px;
+  }
+}
+
+/* Повністю завершені розділи знань, журнали, книги й бонуси. */
+.knowledge-category.complete > summary strong,
+.journal-bonuses details.complete > summary strong {
+  color: #8fd694;
+}
+
+.knowledge-category.complete > summary strong::after,
+.journal-bonuses details.complete > summary strong::after {
+  content: " ✓";
+}
+
+.complete .knowledge-progress .progress-fill,
+.journal-bonuses details.complete .progress-fill {
+  background: #6fbf73;
+}
+
+.journal-bonus-total {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+
+.journal-bonus-total .progress-track {
+  width: 120px;
+}
+
+.journal-missing a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: #4a4f57;
+  text-underline-offset: 3px;
+}
+
+.journal-missing a:hover {
+  color: var(--gold-light);
+  text-decoration-color: var(--gold);
+}
+
+.journal-pages li.flash {
+  animation: journal-flash 1.6s ease;
+}
+
+@keyframes journal-flash {
+  0%, 40% {
+    background: #3a3020;
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+@media (max-width: 480px) {
+  .journal-bonus-total .progress-track {
+    width: 70px;
   }
 }

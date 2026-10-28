@@ -277,7 +277,7 @@ def test_quests_and_adventure_journals(client, tmp_path):
     assert [p["status"] for p in journal["books"][0]["pages"]] == ["done", "done", "locked"]
     (ap,) = data["bonuses"]
     assert (ap["label"], ap["value"], ap["gained"]) == ("Усі AP", 3, 1)
-    assert [m["name"] for m in ap["missing"]] == ["Outside Journal"]
+    assert [(m["name"], m["journal_key"]) for m in ap["missing"]] == [("Outside Journal", None)]
 
     found = client.get("/api/quests", params={"q": "Big Fellow"}).json()
     assert (found["done"], found["open"]) == (3, 0)

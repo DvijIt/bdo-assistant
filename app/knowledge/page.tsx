@@ -53,7 +53,10 @@ function Category({ row, version }: { row: CategoryRow; version: number }) {
   }
 
   return (
-    <details className="knowledge-category" onToggle={(e) => (e.currentTarget.open ? void load() : undefined)}>
+    <details
+      className={`knowledge-category${row.total > 0 && row.gained === row.total ? " complete" : ""}`}
+      onToggle={(e) => (e.currentTarget.open ? void load() : undefined)}
+    >
       <summary>
         <strong>{row.name}</strong>
         <Progress gained={row.gained} total={row.total} />
