@@ -133,6 +133,50 @@ SCHEMA = """
         inputs TEXT NOT NULL
     );
 
+    -- Рівні заточування предметів з item_enhancements.json (лише ті, що заточуються):
+    -- levels — JSON [{level, name, ap, dp, chance, durability, aids: [item_id]}], aids — молотки й кристали долі.
+    CREATE TABLE IF NOT EXISTS game_enhancements (
+        item_id INTEGER PRIMARY KEY,
+        max_level INTEGER NOT NULL,
+        caphras INTEGER,
+        category TEXT,
+        levels TEXT NOT NULL
+    );
+
+    -- Caphras: на якому рівні заточування можна вкладати камені й скільки треба на кожен крок.
+    CREATE TABLE IF NOT EXISTS game_caphras (
+        category INTEGER NOT NULL,
+        enchant_level INTEGER NOT NULL,
+        steps TEXT NOT NULL,            -- JSON [{level, stones, total, stats}]
+        PRIMARY KEY (category, enchant_level)
+    );
+
+    -- Реформа спорядження: з чого (base) що виходить (result).
+    CREATE TABLE IF NOT EXISTS game_reforms (
+        base_id INTEGER NOT NULL,
+        result_id INTEGER NOT NULL,
+        PRIMARY KEY (base_id, result_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS game_lightstones (
+        combo_id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        required TEXT NOT NULL          -- JSON [item_id], з повторами
+    );
+
+    -- Посилені лайтстоуни рахуються як звичайні (countsAs).
+    CREATE TABLE IF NOT EXISTS game_lightstone_aliases (
+        item_id INTEGER PRIMARY KEY,
+        counts_as INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS game_crystal_groups (
+        group_id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        max_count INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS game_data_import (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         source TEXT NOT NULL,
@@ -400,6 +444,88 @@ def _recipe_rows(directory: Path) -> list[tuple]:
     return rows
 
 
+def _enhancement_rows(directory: Path) -> list[tuple]:
+    """item_enhancements.json (~280 МБ) читаємо об'єкт за об'єктом і лишаємо лише потрібні поля."""
+    path = directory / "item_enhancements.json"
+    if not path.is_file():
+        return []
+    items = directory / "items.json"
+    categories = {}
+    if items.is_file():
+        categories = {int(i["id"]): i.get("category") for i in _read_json(items) if isinstance(i, dict) and "id" in i}
+    text = path.read_text(encoding="utf-8")
+    decoder = json.JSONDecoder()
+    pos = text.index("[") + 1
+    rows = []
+    while True:
+        while text[pos] in " ,\r\n\t":
+            pos += 1
+        if text[pos] == "]":
+            break
+        entry, pos = decoder.raw_decode(text, pos)
+        item_id = _urn_id(entry.get("urn"))
+        if item_id is None or not entry.get("maxLevel"):
+            continue
+        levels = []
+        for level in entry.get("levels") or []:
+            aids = [i for i in (_urn_id(u) for u in (level.get("enhancementAids") or {}).get("urns") or []) if i]
+            levels.append({
+                "level": level.get("level"), "name": level.get("name"),
+                "ap": level.get("ap"), "dp": level.get("dp"), "chance": level.get("enhanceChance"),
+                "durability": level.get("durability"), "aids": aids,
+            })
+        rows.append((item_id, entry["maxLevel"], _urn_id(entry.get("caphrasCategory")), categories.get(item_id),
+                     json.dumps(levels, separators=(",", ":"))))
+    return rows
+
+
+def _caphras_rows(directory: Path) -> list[tuple]:
+    path = directory / "caphras.json"
+    if not path.is_file():
+        return []
+    return [
+        (int(category["key"]), int(level["enchantLevel"]),
+         json.dumps([{"level": s["level"], "stones": s["stones"], "total": s["totalStones"], "stats": s.get("stats") or {}}
+                     for s in level.get("steps") or []], separators=(",", ":")))
+        for category in _read_json(path) for level in category.get("levels") or []
+    ]
+
+
+def _reform_rows(directory: Path) -> list[tuple]:
+    path = directory / "item_improvements.json"
+    if not path.is_file():
+        return []
+    rows = set()
+    for row in _read_json(path).get("rows") or []:
+        result = _urn_id(row.get("result"))
+        for base in (row.get("bases") or {}).get("urns") or []:
+            if result and _urn_id(base):
+                rows.add((_urn_id(base), result))
+    return sorted(rows)
+
+
+def _lightstone_rows(directory: Path) -> tuple[list, list] | None:
+    path = directory / "lightstone_combinations.json"
+    if not path.is_file():
+        return None
+    data = _read_json(path)
+    combos = [
+        (int(c["key"]), _clean(c.get("name") or str(c["key"])), _clean(c.get("description") or "") or None,
+         json.dumps([i for i in (_urn_id(u) for u in (c.get("required") or {}).get("urns") or []) if i]))
+        for c in data.get("combinations") or []
+    ]
+    aliases = [(int(a["itemId"]), int(a["countsAsId"])) for a in data.get("aliases") or [] if a.get("itemId")]
+    return combos, aliases
+
+
+def _crystal_rows(directory: Path) -> list[tuple]:
+    path = directory / "crystal_rules.json"
+    if not path.is_file():
+        return []
+    return [(int(g["key"]), _clean(g.get("name") or str(g["key"])), int(g.get("max") or 0))
+            for g in _read_json(path).get("groups") or []]
+
+
 def _npcs(directory: Path) -> list[tuple]:
     """NPC, що стоять у світі: (id, ім'я, титул, район, x, z) — за першою точкою з npcs.json."""
     path = directory / "npcs.json"
@@ -476,7 +602,8 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
         raise GameDataError(f"Папки не знайдено: {directory}")
     loc = _Loc(directory)
     knowledge = _knowledge(directory)
-    outputs = ("world.json", "quests.json", "adventure_journals.json", "zones.json", "recipes.json")
+    outputs = ("world.json", "quests.json", "adventure_journals.json", "zones.json", "recipes.json",
+               "item_enhancements.json", "lightstone_combinations.json")
     if knowledge is None and not loc.available() and not any((directory / name).is_file() for name in outputs):
         raise GameDataError(
             "У папці немає виводу bdo-data-extractor (knowledge.json, world.json, locs/ або loc_<мова>.json)")
@@ -519,6 +646,23 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
         connection.execute("DELETE FROM game_recipes")
         connection.executemany("INSERT OR REPLACE INTO game_recipes VALUES (?, ?, ?, ?, ?)", recipes)
         counts["recipes"] = len(recipes)
+    for table, rows, columns in (
+        ("game_enhancements", _enhancement_rows(directory), 5),
+        ("game_caphras", _caphras_rows(directory), 3),
+        ("game_reforms", _reform_rows(directory), 2),
+        ("game_crystal_groups", _crystal_rows(directory), 3),
+    ):
+        if rows:
+            connection.execute(f"DELETE FROM {table}")
+            connection.executemany(f"INSERT OR REPLACE INTO {table} VALUES ({', '.join('?' * columns)})", rows)
+            counts[table.removeprefix("game_")] = len(rows)
+    lightstones = _lightstone_rows(directory)
+    if lightstones:
+        connection.execute("DELETE FROM game_lightstones")
+        connection.execute("DELETE FROM game_lightstone_aliases")
+        connection.executemany("INSERT OR REPLACE INTO game_lightstones VALUES (?, ?, ?, ?)", lightstones[0])
+        connection.executemany("INSERT OR REPLACE INTO game_lightstone_aliases VALUES (?, ?)", lightstones[1])
+        counts["lightstones"] = len(lightstones[0])
     npcs = _npcs(directory)
     if npcs:
         connection.execute("DELETE FROM game_npcs")
@@ -822,6 +966,87 @@ def craftable(connection: sqlite3.Connection, containers: list[dict], prices: di
     # Спершу найвигідніше, потім — без відомої вигоди, за вартістю результату.
     out.sort(key=lambda r: (r["profit"] is None, -(r["profit"] or 0), -(r["value"] or 0), r["output"]))
     return out
+
+
+CAPHRAS_STONE = 721003
+STAT_KEYS = ("ap", "dp")
+
+
+def _level_view(level: dict | None) -> dict | None:
+    if level is None:
+        return None
+    return {"level": level["level"], "name": level["name"], "ap": level.get("ap"), "dp": level.get("dp")}
+
+
+def gear_plan(connection: sqlite3.Connection, owned: list[dict], counts: dict[int, int]) -> list[dict]:
+    """Наступний крок для кожного предмета, що заточується: що дасть рівень, базовий шанс, чим можна
+    допомогти (молотки є/немає), Caphras на цьому рівні й у що реформується.
+
+    `owned` — [{item_id, enhancement, place}], `counts` — скільки якого предмета є загалом."""
+    ids = sorted({o["item_id"] for o in owned})
+    if not ids:
+        return []
+    marks = ",".join("?" * len(ids))
+    enhancements = {r["item_id"]: r for r in connection.execute(
+        f"SELECT * FROM game_enhancements WHERE item_id IN ({marks})", ids)}
+    reforms: dict[int, list[int]] = {}
+    for base, result in connection.execute(f"SELECT base_id, result_id FROM game_reforms WHERE base_id IN ({marks})", ids):
+        reforms.setdefault(base, []).append(result)
+    caphras = {(r["category"], r["enchant_level"]): json.loads(r["steps"]) for r in connection.execute(
+        "SELECT * FROM game_caphras")}
+    names = dict(connection.execute("SELECT item_id, name FROM items WHERE name IS NOT NULL").fetchall())
+
+    out = []
+    for item in owned:
+        row = enhancements.get(item["item_id"])
+        if row is None:
+            continue
+        levels = {l["level"]: l for l in json.loads(row["levels"])}
+        current, following = levels.get(item["enhancement"]), levels.get(item["enhancement"] + 1)
+        gain = None
+        if current and following:
+            gain = {k: (following.get(k) or 0) - (current.get(k) or 0) for k in STAT_KEYS
+                    if (following.get(k) or 0) != (current.get(k) or 0)}
+        steps = caphras.get((row["caphras"], item["enhancement"])) if row["caphras"] else None
+        out.append({
+            "item_id": item["item_id"], "name": names.get(item["item_id"], f"Предмет #{item['item_id']}"),
+            "category": row["category"], "place": item["place"], "enhancement": item["enhancement"],
+            "max_level": row["max_level"], "current": _level_view(current), "next": _level_view(following),
+            "gain": gain, "chance": following.get("chance") if following else None,
+            "aids": [{"item_id": a, "name": names.get(a, f"#{a}"), "have": counts.get(a, 0)}
+                     for a in (following or {}).get("aids", [])],
+            "caphras": {"steps": steps, "stones": counts.get(CAPHRAS_STONE, 0)} if steps else None,
+            "reforms": [{"item_id": r, "name": names.get(r, f"#{r}")} for r in reforms.get(item["item_id"], [])],
+        })
+    out.sort(key=lambda g: (g["next"] is None, -(g["enhancement"]), g["name"]))
+    return out
+
+
+def lightstones(connection: sqlite3.Connection, counts: dict[int, int]) -> list[dict]:
+    """Комбінації лайтстоунів: що потрібно, скільки є (посилені рахуються як звичайні) і чи можна зібрати."""
+    aliases = dict(connection.execute("SELECT item_id, counts_as FROM game_lightstone_aliases").fetchall())
+    have: dict[int, int] = {}
+    for item_id, count in counts.items():
+        key = aliases.get(item_id, item_id)
+        have[key] = have.get(key, 0) + count
+    names = dict(connection.execute("SELECT item_id, name FROM items WHERE name IS NOT NULL").fetchall())
+    out = []
+    for row in connection.execute("SELECT * FROM game_lightstones ORDER BY name"):
+        need: dict[int, int] = {}
+        for item_id in json.loads(row["required"]):
+            need[item_id] = need.get(item_id, 0) + 1
+        stones = [{"item_id": i, "name": names.get(i, f"#{i}"), "count": c, "have": have.get(i, 0)}
+                  for i, c in need.items()]
+        out.append({"combo_id": row["combo_id"], "name": row["name"], "description": row["description"],
+                    "stones": stones, "ready": all(s["have"] >= s["count"] for s in stones),
+                    "owned": sum(min(s["have"], s["count"]) for s in stones), "total": sum(need.values())})
+    out.sort(key=lambda c: (not c["ready"], -(c["owned"] / c["total"] if c["total"] else 0), c["name"]))
+    return out
+
+
+def crystal_groups(connection: sqlite3.Connection) -> list[dict]:
+    return [{"group_id": r["group_id"], "name": r["name"], "max": r["max_count"]}
+            for r in connection.execute("SELECT * FROM game_crystal_groups ORDER BY max_count, name")]
 
 
 # Плитки карти, як у грі: extractor `worldmap-files` пише <шар>/<z>/<x>/<y>.webp і meta.json на шар.

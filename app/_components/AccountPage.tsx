@@ -31,6 +31,8 @@ const SECTIONS: { label: string; pages: { href: string; icon: string; label: str
     pages: [
       { href: "/grind/", icon: "☠", label: "Гринд" },
       { href: "/crafting/", icon: "⚗", label: "Що зготувати" },
+      { href: "/gear/", icon: "⛨", label: "Спорядження" },
+      { href: "/builds/", icon: "◆", label: "Лайтстоуни й кристали" },
       { href: "/map/", icon: "⊕", label: "Карта" },
     ],
   },

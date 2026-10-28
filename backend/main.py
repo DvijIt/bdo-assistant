@@ -412,6 +412,40 @@ def get_recipes():
     return {"recipes": recipes, "known": total, "holdings": bool(containers)}
 
 
+def _owned_items(connection) -> tuple[list[dict], dict[int, int]]:
+    """Предмети з останнього знімка складів і спорядження транспорту: [{item_id, enhancement, place}] і кількості."""
+    owned, counts = [], {}
+    for container in snapshots.current_holdings(connection):
+        if container["kind"] == "currency":
+            continue
+        place = container["name"] if container["kind"] == "storage" or not container["character"] \
+            else f"{container['name']} ({container['character']})"
+        for item in container["items"]:
+            counts[item["item_id"]] = counts.get(item["item_id"], 0) + item["quantity"]
+            owned.append({"item_id": item["item_id"], "enhancement": item["enhancement"], "place": place})
+    for servant in account.list_servants(connection, {}):
+        for gear in servant["gear"]:
+            owned.append({"item_id": gear["item_id"], "enhancement": 0, "place": f"Транспорт: {servant['name']}"})
+    return owned, counts
+
+
+@app.get("/api/gear-plan")
+def get_gear_plan():
+    """Заточування, Caphras і реформа для предметів, які вже є."""
+    with get_connection() as connection:
+        owned, counts = _owned_items(connection)
+        return {"items": game_data.gear_plan(connection, owned, counts)}
+
+
+@app.get("/api/builds")
+def get_builds():
+    """Комбінації лайтстоунів з урахуванням наявних каменів і правила кристалів."""
+    with get_connection() as connection:
+        _, counts = _owned_items(connection)
+        return {"lightstones": game_data.lightstones(connection, counts),
+                "crystals": game_data.crystal_groups(connection)}
+
+
 @app.get("/api/map")
 def get_map():
     """Шари карти, вузли й NPC для ще не зібраних знань; null, доки плиток карти немає."""

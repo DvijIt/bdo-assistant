@@ -2062,3 +2062,43 @@ a.nav-item {
 .recipe-more {
   margin-top: 12px;
 }
+
+/* Спорядження й білди. */
+.gear-notes {
+  margin-top: 8px;
+}
+
+.gear-notes li.gear-have {
+  color: #8fd694;
+  border-color: #2f4a33;
+}
+
+.gear-caphras {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.gear-caphras > summary {
+  color: var(--gold);
+  cursor: pointer;
+}
+
+.gear-caphras table {
+  margin-top: 8px;
+}
+
+.gear-caphras tr.gear-reachable td {
+  color: #8fd694;
+}
+
+.build-ready .recipe-title strong {
+  color: #8fd694;
+}
+
+.build-effects {
+  white-space: normal;
+}
+
+.build-crystals b {
+  color: var(--gold-light);
+}

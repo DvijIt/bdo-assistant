@@ -326,3 +326,44 @@ def test_recipes_from_holdings(client, tmp_path):
         "Кулінарія", 2, "Velia", 1, 2000)
     assert (beer["cost"], beer["profit"]) == (2 * (5 * 10 + 6 * 20), 2000 - 340)
     assert [(i["item_id"], i["have"]) for i in beer["inputs"]] == [(7005, 12), (9059, 12)]
+
+
+def test_gear_plan_and_lightstones(client, tmp_path):
+    write(tmp_path / "items.json", [{"id": 10007, "name": "Test Longsword", "category": "MainWeapon"},
+                                    {"id": 770, "name": "Test Hammer"}, {"id": 721003, "name": "Caphras Stone"},
+                                    {"id": 10031, "name": "Reformed Longsword"},
+                                    {"id": 758003, "name": "Stone A"}, {"id": 758203, "name": "Amplified Stone A"},
+                                    {"id": 762004, "name": "Stone B"}])
+    level = lambda n, name, ap, chance, aids=(): {"level": n, "name": name, "ap": ap, "enhanceChance": chance,
+                                                  "durability": 100, "enhancementAids": {"urns": [f"urn::item:{a}" for a in aids] or None}}
+    (tmp_path / "item_enhancements.json").write_text(json.dumps([
+        {"urn": "urn::enhancement:29903", "maxLevel": 0, "levels": [level(0, "Base", 1, 1)]},
+        {"urn": "urn::enhancement:10007", "maxLevel": 20, "caphrasCategory": "urn::caphras:4",
+         "levels": [level(17, "DUO (II)", 80, 0.07), level(18, "TRI (III)", 88, 0.04, [770])]},
+    ]), encoding="utf-8")
+    write(tmp_path / "caphras.json", [{"key": 4, "levels": [{"enchantLevel": 17, "steps": [
+        {"level": 1, "stones": 10, "totalStones": 10, "stats": {"ap": 1}},
+        {"level": 2, "stones": 20, "totalStones": 30, "stats": {"ap": 2}}]}]}])
+    write(tmp_path / "item_improvements.json", {"rows": [
+        {"result": "urn::item:10031", "bases": {"urns": ["urn::item:10007"]}}]})
+    write(tmp_path / "lightstone_combinations.json", {
+        "combinations": [{"key": 2, "name": "<PAColor0xffd2ffad>[Test]<PAOldColor>", "description": "[Test]\nAP +2",
+                          "required": {"urns": ["urn::item:758003", "urn::item:758003", "urn::item:762004"]}}],
+        "aliases": [{"itemId": 758203, "countsAsId": 758003}],
+    })
+    write(tmp_path / "crystal_rules.json", {"groups": [{"key": 5, "name": "Spirit", "max": 2}], "specialSlots": []})
+    counts = client.post("/api/game-data/import", json={"path": str(tmp_path)}).json()
+    assert (counts["enhancements"], counts["caphras"], counts["reforms"], counts["lightstones"]) == (1, 1, 1, 1)
+
+    owned = [{"item_id": 10007, "enhancement": 17, "place": "Velia"}, {"item_id": 99, "enhancement": 0, "place": "Velia"}]
+    have = {770: 1, 721003: 15, 758003: 1, 758203: 1, 762004: 1}
+    with main.get_connection() as connection:
+        (sword,) = main.game_data.gear_plan(connection, owned, have)
+        (combo,) = main.game_data.lightstones(connection, have)
+    assert (sword["current"]["name"], sword["next"]["name"], sword["chance"], sword["gain"]) == (
+        "DUO (II)", "TRI (III)", 0.04, {"ap": 8})
+    assert sword["aids"] == [{"item_id": 770, "name": "Test Hammer", "have": 1}]
+    assert sword["caphras"]["stones"] == 15 and [s["total"] for s in sword["caphras"]["steps"]] == [10, 30]
+    assert sword["reforms"] == [{"item_id": 10031, "name": "Reformed Longsword"}]
+    # Посилений камінь рахується як звичайний: 2 з 2 «Stone A».
+    assert (combo["name"], combo["ready"], combo["owned"], combo["total"]) == ("[Test]", True, 3, 3)
