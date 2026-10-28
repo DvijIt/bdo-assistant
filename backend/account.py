@@ -85,6 +85,22 @@ SCHEMA = """
         ecology_points INTEGER NOT NULL,
         updated_at REAL NOT NULL
     );
+
+    -- Очки внеску сім'ї приходять при вході у світ, ще до даних персонажа.
+    CREATE TABLE IF NOT EXISTS contribution (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        available INTEGER NOT NULL,
+        total INTEGER NOT NULL,
+        experience INTEGER NOT NULL,
+        updated_at REAL NOT NULL
+    );
+
+    -- Стан вузлів сім'ї: invested = 1, якщо у вузол вкладено очки внеску.
+    CREATE TABLE IF NOT EXISTS nodes (
+        node_id INTEGER PRIMARY KEY,
+        invested INTEGER NOT NULL,
+        last_seen REAL NOT NULL
+    );
 """
 
 # Ймовірна відповідність рівнів буквам у грі; не перевірена на конкретних знаннях.
@@ -97,10 +113,11 @@ INDESTRUCTIBLE = 32767
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(SCHEMA)
-    try:
-        connection.execute("ALTER TABLE characters ADD COLUMN slot INTEGER")
-    except sqlite3.OperationalError:  # колонка вже є
-        pass
+    for column in ("slot", "skill_points", "skill_points_total"):
+        try:
+            connection.execute(f"ALTER TABLE characters ADD COLUMN {column} INTEGER")
+        except sqlite3.OperationalError:  # колонка вже є
+            pass
     # Раніше клас читався як u32 разом зі слотом у старших байтах.
     connection.execute(
         """
@@ -221,6 +238,33 @@ class AccountWriter:
         )
 
 
+    def _skill_points(self, connection: sqlite3.Connection, r) -> None:
+        if self.current_character_id is None:
+            return
+        connection.execute(
+            "UPDATE characters SET skill_points = ?, skill_points_total = ? WHERE character_id = ?",
+            (r.available, r.total, self.current_character_id),
+        )
+
+    def _contribution(self, connection: sqlite3.Connection, r) -> None:
+        connection.execute(
+            """
+            INSERT INTO contribution (id, available, total, experience, updated_at) VALUES (1, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET available = excluded.available, total = excluded.total,
+                experience = excluded.experience, updated_at = excluded.updated_at
+            """,
+            (r.available, r.total, r.experience, r.observed_at),
+        )
+
+    def _node_batch(self, connection: sqlite3.Connection, r) -> None:
+        connection.executemany(
+            """
+            INSERT INTO nodes (node_id, invested, last_seen) VALUES (?, ?, ?)
+            ON CONFLICT (node_id) DO UPDATE SET invested = excluded.invested, last_seen = excluded.last_seen
+            """,
+            [(n.node_id, int(n.invested), r.observed_at) for n in r.nodes],
+        )
+
     def _knowledge_batch(self, connection: sqlite3.Connection, r) -> None:
         connection.executemany(
             """
@@ -279,10 +323,23 @@ def list_characters(connection: sqlite3.Connection) -> list[dict]:
             "xp": row["xp"],
             "xp_to_next": row["xp_to_next"],
             "xp_percent": (100 * row["xp"] / row["xp_to_next"]) if row["xp"] is not None and row["xp_to_next"] else None,
+            "skill_points": row["skill_points"],
+            "skill_points_total": row["skill_points_total"],
             "last_seen": row["last_seen"],
         }
         for row in rows
     ]
+
+
+def contribution(connection: sqlite3.Connection) -> dict | None:
+    row = connection.execute("SELECT * FROM contribution WHERE id = 1").fetchone()
+    if row is None:
+        return None
+    return {"available": row["available"], "total": row["total"], "updated_at": row["updated_at"]}
+
+
+def invested_node_ids(connection: sqlite3.Connection) -> list[int]:
+    return [row[0] for row in connection.execute("SELECT node_id FROM nodes WHERE invested = 1 ORDER BY node_id")]
 
 
 def family_summary(connection: sqlite3.Connection) -> dict | None:
@@ -295,6 +352,7 @@ def family_summary(connection: sqlite3.Connection) -> dict | None:
             "combat": row["fame_combat"], "life": row["fame_life"], "third": row["fame_third"],
             "total": row["fame_combat"] + row["fame_life"] + row["fame_third"],
         },
+        "contribution": contribution(connection),
         "updated_at": row["updated_at"],
     }
 

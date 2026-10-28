@@ -316,6 +316,30 @@ def get_family():
         return account.family_summary(connection)
 
 
+@app.get("/api/nodes")
+def get_nodes():
+    """Вкладені вузли сім'ї з назвами, територіями й продуктами з власного клієнта."""
+    with get_connection() as connection:
+        invested = account.invested_node_ids(connection)
+        names = game_data.lookup(connection, "node")
+        details = game_data.node_details(connection, invested)
+        points = account.contribution(connection)
+    nodes = []
+    for node_id in invested:
+        info = details.get(node_id, {})
+        manager = info.get("manager_id")
+        nodes.append({
+            "node_id": node_id,
+            "name": names.get(str(node_id), f"Вузол #{node_id}"),
+            "territory": info.get("territory"),
+            "manager_id": manager,
+            "manager_name": names.get(str(manager)) if manager else None,
+            "contribution": info.get("contribution"),
+            "products": info.get("products", []),
+        })
+    return {"contribution": points, "nodes": nodes}
+
+
 @app.get("/api/workers")
 def get_workers():
     with get_connection() as connection:

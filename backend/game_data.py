@@ -34,6 +34,16 @@ SCHEMA = """
         PRIMARY KEY (kind, key)
     );
 
+    -- Вузли з world.json: територія, головний вузол (для підвузлів), вартість у CP і продукти.
+    CREATE TABLE IF NOT EXISTS game_nodes (
+        node_id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        territory TEXT,
+        manager_id INTEGER,
+        contribution INTEGER,
+        products TEXT NOT NULL          -- JSON-список item_id
+    );
+
     CREATE TABLE IF NOT EXISTS game_data_import (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         source TEXT NOT NULL,
@@ -196,12 +206,24 @@ def _acquisition(text) -> str | None:
     return cleaned if cleaned and set(cleaned) != {"?"} else None
 
 
-def _nodes(directory: Path) -> dict[int, str]:
+def _world(directory: Path) -> tuple[dict[int, str], list[tuple]]:
+    """Назви ввімкнених вузлів і рядки game_nodes з world.json."""
     path = directory / "world.json"
     if not path.is_file():
-        return {}
-    nodes = _read_json(path).get("nodes") or []
-    return {int(n["key"]): _clean(n["name"]) for n in nodes if n.get("name") and n.get("enabled", True)}
+        return {}, []
+    world = _read_json(path)
+    territories = {t.get("index"): _clean(t.get("name") or "") for t in world.get("territories") or []}
+    names: dict[int, str] = {}
+    rows = []
+    for node in world.get("nodes") or []:
+        if not node.get("name") or not node.get("enabled", True):
+            continue
+        key = int(node["key"])
+        names[key] = _clean(node["name"])
+        products = [i for i in (_urn_id(u) for u in (node.get("products") or {}).get("urns") or []) if i]
+        rows.append((key, names[key], territories.get(_urn_id(node.get("territory"))) or None,
+                     _urn_id(node.get("managerNode")), node.get("contribution"), json.dumps(products)))
+    return names, rows
 
 
 def _items(directory: Path) -> list[tuple]:
@@ -256,7 +278,11 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
     if knowledge is not None:
         counts.update(knowledge_names.replace(connection, *knowledge))
     # world.json знає лише ввімкнені вузли; решту назв доповнює таблиця loc.
-    nodes = {**_names(loc.table(NODE_TABLE)), **_nodes(directory)}
+    world_names, world_nodes = _world(directory)
+    nodes = {**_names(loc.table(NODE_TABLE)), **world_names}
+    if world_nodes:
+        connection.execute("DELETE FROM game_nodes")
+        connection.executemany("INSERT INTO game_nodes VALUES (?, ?, ?, ?, ?, ?)", world_nodes)
     names +=[("node", str(k), v) for k, v in nodes.items()]
     counts["nodes"] = len(nodes)
     items = _items(directory)
@@ -356,6 +382,24 @@ def _image(connection: sqlite3.Connection, urn: str) -> Path | None:
     if not path.is_relative_to(base) or not path.is_file():
         return None
     return path
+
+
+def node_details(connection: sqlite3.Connection, node_ids: list[int]) -> dict[int, dict]:
+    """Подробиці вузлів з world.json (порожньо, доки його не імпортовано)."""
+    rows = {row["node_id"]: row for row in connection.execute("SELECT * FROM game_nodes")}
+    items = dict(connection.execute("SELECT item_id, name FROM items WHERE name IS NOT NULL").fetchall())
+    out = {}
+    for node_id in node_ids:
+        row = rows.get(node_id)
+        if row is None:
+            continue
+        out[node_id] = {
+            "territory": row["territory"],
+            "manager_id": row["manager_id"],
+            "contribution": row["contribution"],
+            "products": [items.get(i, f"#{i}") for i in json.loads(row["products"])],
+        }
+    return out
 
 
 def lookup(connection: sqlite3.Connection, kind: str) -> dict[str, str]:

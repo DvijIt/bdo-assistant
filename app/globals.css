@@ -1429,3 +1429,52 @@ a.nav-item {
 .game-data-form {
   max-width: 520px;
 }
+
+/* Вузли: головні вузли з підвузлами (фермами, шахтами) під ними. */
+.node-list,
+.node-children {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.node-list > li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.node-list > li:last-child {
+  border-bottom: 0;
+}
+
+.node-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.node-row small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.node-cost {
+  flex: none;
+  color: var(--gold);
+  font-size: 11px;
+}
+
+.node-children {
+  margin: 6px 0 0 14px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+
+.node-children li {
+  padding: 4px 0;
+  color: #c5cad2;
+}

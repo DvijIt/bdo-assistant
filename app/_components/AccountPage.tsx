@@ -14,6 +14,7 @@ const SECTIONS: { label: string; pages: { href: string; icon: string; label: str
       { href: "/characters/", icon: "⚔", label: "Персонажі" },
       { href: "/inventory/", icon: "◉", label: "Ресурси" },
       { href: "/workers/", icon: "⚒", label: "Робітники" },
+      { href: "/nodes/", icon: "⌖", label: "Вузли" },
       { href: "/transport/", icon: "⚓", label: "Транспорт" },
       { href: "/knowledge/", icon: "✦", label: "Знання" },
     ],

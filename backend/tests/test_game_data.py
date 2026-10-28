@@ -3,7 +3,8 @@ import json
 import pytest
 
 pytest.importorskip("bdo_toolkit.account")
-from bdo_toolkit.account import CharacterInfo, GearItem, KnowledgeBatch, KnowledgeEntry, Servant, Worker  # noqa: E402
+from bdo_toolkit.account import (CharacterInfo, Contribution, GearItem, KnowledgeBatch, KnowledgeEntry,  # noqa: E402
+                                 NodeBatch, NodeState, Servant, SkillPoints, Worker)
 
 import main  # noqa: E402
 
@@ -27,8 +28,10 @@ def extractor_output(tmp_path):
             {"key": 4006, "theme": "urn::knowledge:theme:10002", "name": "Boar"},
         ],
     })
-    write(out / "world.json", {"territories": [], "regions": [], "nodes": [
-        {"key": 301, "name": "Testheim", "enabled": True},
+    write(out / "world.json", {"territories": [{"index": 1, "name": "Testland"}], "regions": [], "nodes": [
+        {"key": 301, "name": "Testheim", "enabled": True, "territory": "urn::world:territory:1"},
+        {"key": 135, "name": "Test Farming", "enabled": True, "territory": "urn::world:territory:1",
+         "managerNode": "urn::world:node:301", "contribution": 1, "products": {"urns": ["urn::item:49706"]}},
         {"key": 9, "name": "Unused", "enabled": False},
     ]})
     write(out / "items.json", [{"id": 49706, "name": "Test Prow", "grade": 3},
@@ -52,7 +55,7 @@ def save(records):
 def test_import_extractor_output_names_everything(client, extractor_output):
     counts = client.post("/api/game-data/import", json={"path": str(extractor_output)}).json()
 
-    assert counts == {"categories": 2, "knowledge": 2, "nodes": 1, "items": 1, "quests": 1, "characters": 3,
+    assert counts == {"categories": 2, "knowledge": 2, "nodes": 2, "items": 1, "quests": 1, "characters": 3,
                       "worker_skills": 4}
     assert client.get("/api/game-data").json()["counts"] == counts
 
@@ -165,3 +168,24 @@ def test_knowledge_tree_follows_the_game_book(client, tmp_path):
     assert [e["name"] for e in balenos] == ["Wolf", "Boar"]  # порядок знань — як у файлі
     assert balenos[0]["acquisition"] == "Can be obtained through [Exploration]\nBalenos Forest"
     assert balenos[1]["acquisition"] is None
+
+
+def test_contribution_skill_points_and_invested_nodes(client, extractor_output):
+    save([
+        Contribution(1.0, available=195, total=411, experience=3699),
+        CharacterInfo(2.0, 7, "Mobix", "Testfam", 13, 1, 1, 1, slot=0),
+        SkillPoints(3.0, available=183, total=1892),
+        NodeBatch(1.0, (NodeState(301, True), NodeState(135, True), NodeState(9, False))),
+    ])
+    client.post("/api/game-data/import", json={"path": str(extractor_output)})
+
+    assert client.get("/api/family").json()["contribution"] == {"available": 195, "total": 411, "updated_at": 1.0}
+    (character,) = client.get("/api/characters").json()
+    assert (character["skill_points"], character["skill_points_total"]) == (183, 1892)
+
+    data = client.get("/api/nodes").json()
+    assert data["contribution"]["available"] == 195
+    farming = next(n for n in data["nodes"] if n["node_id"] == 135)
+    assert farming == {"node_id": 135, "name": "Test Farming", "territory": "Testland", "manager_id": 301,
+                       "manager_name": "Testheim", "contribution": 1, "products": ["Test Prow"]}
+    assert [n["node_id"] for n in data["nodes"]] == [135, 301]

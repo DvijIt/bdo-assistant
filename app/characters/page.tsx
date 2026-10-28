@@ -13,12 +13,15 @@ type Character = {
   xp: number | null;
   xp_to_next: number | null;
   xp_percent: number | null;
+  skill_points: number | null;
+  skill_points_total: number | null;
   last_seen: number;
 };
 
 type Family = {
   name: string | null;
   fame: { combat: number; life: number; third: number; total: number };
+  contribution: { available: number; total: number } | null;
   updated_at: number;
 } | null;
 
@@ -53,6 +56,12 @@ export default function CharactersPage() {
             <div><dt>Бій</dt><dd>{fame.combat.toLocaleString("uk-UA")}</dd></div>
             <div><dt>Життя</dt><dd>{fame.life.toLocaleString("uk-UA")}</dd></div>
             <div><dt>Інша</dt><dd>{fame.third.toLocaleString("uk-UA")}</dd></div>
+            {family.data!.contribution && (
+              <div>
+                <dt>Очки внеску</dt>
+                <dd>{family.data!.contribution.available} / {family.data!.contribution.total}</dd>
+              </div>
+            )}
           </dl>
         </section>
       )}
@@ -79,6 +88,11 @@ export default function CharactersPage() {
               {character.xp !== null && character.xp_to_next !== null && (
                 <p className="inventory-muted">
                   XP {character.xp.toLocaleString("uk-UA")} / {character.xp_to_next.toLocaleString("uk-UA")}
+                </p>
+              )}
+              {character.skill_points !== null && character.skill_points_total !== null && (
+                <p className="inventory-muted">
+                  Очки навичок {character.skill_points.toLocaleString("uk-UA")} / {character.skill_points_total.toLocaleString("uk-UA")}
                 </p>
               )}
               <p className="account-seen">Оновлено {formatSeen(character.last_seen)}</p>
