@@ -113,6 +113,26 @@ SCHEMA = """
         PRIMARY KEY (quest_key, reward_slot)
     );
 
+    -- Місця для гринду з zones.json (Monster Zone Info): рекомендовані AP/DP і вузол на карті.
+    CREATE TABLE IF NOT EXISTS game_grind_spots (
+        spot_id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        region TEXT,
+        sheet_ap INTEGER,
+        sheet_dp INTEGER,
+        x REAL,
+        z REAL
+    );
+
+    -- Рецепти з recipes.json: тип (COOK, ALCHEMY, HEAT, HOUSE…), станція й інгредієнти (JSON [[item_id, count]]).
+    CREATE TABLE IF NOT EXISTS game_recipes (
+        recipe_id TEXT PRIMARY KEY,
+        output_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        station TEXT,
+        inputs TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS game_data_import (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         source TEXT NOT NULL,
@@ -351,6 +371,35 @@ def _journal_rows(directory: Path) -> tuple[list, list, list, list] | None:
     return journals, books, pages, bonuses
 
 
+def _grind_rows(directory: Path) -> list[tuple]:
+    path = directory / "zones.json"
+    if not path.is_file():
+        return []
+    rows = []
+    for zone in _read_json(path):
+        node = zone.get("node") or {}
+        x, z = _ground(node.get("pos"))
+        rows.append((int(zone["key"]), _clean(zone.get("name") or str(zone["key"])),
+                     _clean((zone.get("mainCategory") or {}).get("name") or "") or None,
+                     zone.get("sheetAP"), zone.get("sheetDP"), x, z))
+    return rows
+
+
+def _recipe_rows(directory: Path) -> list[tuple]:
+    """Рецепти без побічних продуктів (byproductOf — те, що випадає під час обробки іншого)."""
+    path = directory / "recipes.json"
+    if not path.is_file():
+        return []
+    rows = []
+    for recipe in _read_json(path) or []:
+        output = _urn_id(recipe.get("output"))
+        inputs = [[_urn_id(i.get("item")), int(i.get("count") or 1)] for i in recipe.get("inputs") or []]
+        if output is None or recipe.get("byproductOf") or not inputs or any(i[0] is None for i in inputs):
+            continue
+        rows.append((recipe["urn"], output, recipe.get("type") or "OTHER", recipe.get("station"), json.dumps(inputs)))
+    return rows
+
+
 def _npcs(directory: Path) -> list[tuple]:
     """NPC, що стоять у світі: (id, ім'я, титул, район, x, z) — за першою точкою з npcs.json."""
     path = directory / "npcs.json"
@@ -427,7 +476,7 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
         raise GameDataError(f"Папки не знайдено: {directory}")
     loc = _Loc(directory)
     knowledge = _knowledge(directory)
-    outputs = ("world.json", "quests.json", "adventure_journals.json")
+    outputs = ("world.json", "quests.json", "adventure_journals.json", "zones.json", "recipes.json")
     if knowledge is None and not loc.available() and not any((directory / name).is_file() for name in outputs):
         raise GameDataError(
             "У папці немає виводу bdo-data-extractor (knowledge.json, world.json, locs/ або loc_<мова>.json)")
@@ -460,6 +509,16 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
         connection.executemany("INSERT INTO game_journal_books VALUES (?, ?, ?, ?, ?)", journals[1])
         connection.executemany("INSERT INTO game_journal_pages VALUES (?, ?, ?, ?, ?, ?, ?, ?)", journals[2])
         counts["journals"] = len(journals[0])
+    spots = _grind_rows(directory)
+    if spots:
+        connection.execute("DELETE FROM game_grind_spots")
+        connection.executemany("INSERT INTO game_grind_spots VALUES (?, ?, ?, ?, ?, ?, ?)", spots)
+        counts["grind_spots"] = len(spots)
+    recipes = _recipe_rows(directory)
+    if recipes:
+        connection.execute("DELETE FROM game_recipes")
+        connection.executemany("INSERT OR REPLACE INTO game_recipes VALUES (?, ?, ?, ?, ?)", recipes)
+        counts["recipes"] = len(recipes)
     npcs = _npcs(directory)
     if npcs:
         connection.execute("DELETE FROM game_npcs")
@@ -682,6 +741,89 @@ def search_quests(connection: sqlite3.Connection, status: dict[str, str], text: 
     return out
 
 
+# Наскільки нижче за рекомендацію ще можна фармити (у грі шкода падає поступово, а не одразу).
+GRIND_MARGIN = 0.9
+
+
+def grind_status(ap: int | None, dp: int | None, sheet_ap: int | None, sheet_dp: int | None) -> str:
+    """ok — обидва показники не нижчі за рекомендовані; close — не нижче 90 %; low — слабше."""
+    if ap is None or dp is None or not sheet_ap or not sheet_dp:
+        return "unknown"
+    if ap >= sheet_ap and dp >= sheet_dp:
+        return "ok"
+    if ap >= sheet_ap * GRIND_MARGIN and dp >= sheet_dp * GRIND_MARGIN:
+        return "close"
+    return "low"
+
+
+def grind_spots(connection: sqlite3.Connection, ap: int | None, dp: int | None) -> list[dict]:
+    return [
+        {"spot_id": row["spot_id"], "name": row["name"], "region": row["region"],
+         "sheet_ap": row["sheet_ap"], "sheet_dp": row["sheet_dp"], "on_map": row["x"] is not None,
+         "status": grind_status(ap, dp, row["sheet_ap"], row["sheet_dp"])}
+        for row in connection.execute("SELECT * FROM game_grind_spots ORDER BY sheet_ap, sheet_dp, name")
+    ]
+
+
+RECIPE_TYPES = {
+    "COOK": "Кулінарія", "SIMPLE_COOK": "Проста кулінарія", "ROYALGIFT_COOK": "Імперська кулінарія",
+    "ALCHEMY": "Алхімія", "SIMPLE_ALCHEMY": "Проста алхімія", "ROYALGIFT_ALCHEMY": "Імперська алхімія",
+    "HEAT": "Нагрівання", "DRY": "Сушіння", "GRIND": "Подрібнення", "CHOP": "Різання", "FIREWOOD": "Колка дров",
+    "FILTER": "Фільтрація", "SHAKE": "Струшування", "CRAFT": "Ремесло", "HOUSE": "Майстерня",
+}
+
+
+def craftable(connection: sqlite3.Connection, containers: list[dict], prices: dict) -> list[dict]:
+    """Рецепти, які можна зробити з того, що вже є: з одного місця (інвентар персонажа чи склад
+    міста — гра бере інгредієнти саме звідти) або лише після перенесення з різних складів."""
+    places: list[tuple[str, dict[int, int]]] = []
+    family: dict[int, int] = {}
+    for container in containers:
+        if container["kind"] == "currency":
+            continue
+        have: dict[int, int] = {}
+        for item in container["items"]:
+            have[item["item_id"]] = have.get(item["item_id"], 0) + item["quantity"]
+            family[item["item_id"]] = family.get(item["item_id"], 0) + item["quantity"]
+        label = container["name"] if container["kind"] == "storage" else \
+            f"{container['name']} ({container['character']})" if container["character"] else container["name"]
+        places.append((label, have))
+    names = dict(connection.execute("SELECT item_id, name FROM items WHERE name IS NOT NULL").fetchall())
+
+    def times(have: dict[int, int], inputs: list[list[int]]) -> int:
+        return min(have.get(item, 0) // count for item, count in inputs)
+
+    out = []
+    for row in connection.execute("SELECT * FROM game_recipes"):
+        inputs = json.loads(row["inputs"])
+        total = times(family, inputs)
+        if total < 1:
+            continue
+        best_place, best = None, 0
+        for label, have in places:
+            n = times(have, inputs)
+            if n > best:
+                best_place, best = label, n
+        price = prices.get((row["output_id"], 0))
+        input_prices = [prices.get((i, 0)) for i, _ in inputs]
+        cost = sum(p * c for p, (_, c) in zip(input_prices, inputs)) * total if all(input_prices) else None
+        value = price * total if price else None
+        out.append({
+            "recipe_id": row["recipe_id"], "output_id": row["output_id"],
+            "output": names.get(row["output_id"], f"Предмет #{row['output_id']}"),
+            "type": row["type"], "type_label": RECIPE_TYPES.get(row["type"], row["type"]), "station": row["station"],
+            "inputs": [{"item_id": i, "name": names.get(i, f"#{i}"), "count": c, "have": family.get(i, 0)}
+                       for i, c in inputs],
+            "times": total, "best_place": best_place, "best_times": best,
+            "unit_price": price, "value": value, "cost": cost,
+            # Вигода відома, лише коли на ринку є ціна й результату, й усіх інгредієнтів.
+            "profit": value - cost if value is not None and cost is not None else None,
+        })
+    # Спершу найвигідніше, потім — без відомої вигоди, за вартістю результату.
+    out.sort(key=lambda r: (r["profit"] is None, -(r["profit"] or 0), -(r["value"] or 0), r["output"]))
+    return out
+
+
 # Плитки карти, як у грі: extractor `worldmap-files` пише <шар>/<z>/<x>/<y>.webp і meta.json на шар.
 TILES_DIR = "worldmap-files"
 MAP_LAYERS = ("world", "morningland")
@@ -746,8 +888,16 @@ def map_data(connection: sqlite3.Connection, invested: set[int], gained: set[int
         })
         npc["knowledge"].append({"knowledge_id": link["knowledge_id"], "name": link["knowledge"],
                                  "category": link["category"], "acquisition": link["acquisition"]})
+    spots = []
+    for spot in connection.execute("SELECT * FROM game_grind_spots WHERE x IS NOT NULL"):
+        layer = _layer_of(layers, spot["x"], spot["z"])
+        if layer:
+            spots.append({"spot_id": spot["spot_id"], "name": spot["name"], "region": spot["region"],
+                          "sheet_ap": spot["sheet_ap"], "sheet_dp": spot["sheet_dp"],
+                          "layer": layer, "x": spot["x"], "z": spot["z"]})
     return {
         "layers": layers,
+        "grind": spots,
         "nodes": nodes,
         "npcs": sorted(npcs.values(), key=lambda n: (-len(n["knowledge"]), n["name"])),
     }

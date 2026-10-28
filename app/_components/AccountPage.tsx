@@ -16,9 +16,21 @@ const SECTIONS: { label: string; pages: { href: string; icon: string; label: str
       { href: "/workers/", icon: "⚒", label: "Робітники" },
       { href: "/nodes/", icon: "⌖", label: "Вузли" },
       { href: "/transport/", icon: "⚓", label: "Транспорт" },
+    ],
+  },
+  {
+    label: "ПРОГРЕС",
+    pages: [
       { href: "/knowledge/", icon: "✦", label: "Знання" },
       { href: "/quests/", icon: "❖", label: "Квести" },
       { href: "/journals/", icon: "❦", label: "Журнали пригод" },
+    ],
+  },
+  {
+    label: "ЩО РОБИТИ",
+    pages: [
+      { href: "/grind/", icon: "☠", label: "Гринд" },
+      { href: "/crafting/", icon: "⚗", label: "Що зготувати" },
       { href: "/map/", icon: "⊕", label: "Карта" },
     ],
   },

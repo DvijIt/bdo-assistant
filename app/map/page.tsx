@@ -40,9 +40,31 @@ type MapNpc = {
   knowledge: MapKnowledge[];
 };
 
-type MapData = { layers: Layer[]; nodes: MapNode[]; npcs: MapNpc[] } | null;
+type MapSpot = {
+  spot_id: number;
+  name: string;
+  region: string | null;
+  sheet_ap: number | null;
+  sheet_dp: number | null;
+  layer: string;
+  x: number;
+  z: number;
+};
 
-type Selection = { kind: "node"; node: MapNode } | { kind: "npc"; npc: MapNpc };
+type MapData = { layers: Layer[]; grind: MapSpot[]; nodes: MapNode[]; npcs: MapNpc[] } | null;
+
+type GrindStatus = "ok" | "close" | "low" | "unknown";
+
+type Grind = { gear: { ap: number | null; dp: number | null }; spots: { spot_id: number; status: GrindStatus }[] };
+
+type Selection = { kind: "node"; node: MapNode } | { kind: "npc"; npc: MapNpc } | { kind: "spot"; spot: MapSpot };
+
+const GRIND_LABELS: Record<GrindStatus, string> = {
+  ok: "AP/DP підходять",
+  close: "Трохи не вистачає AP/DP",
+  low: "Заслабко",
+  unknown: "Свої AP/DP введи на сторінці «Гринд»",
+};
 
 // Вид: масштаб — екранних пікселів на піксель найдетальнішого рівня плиток; x, y — зсув.
 type View = { scale: number; x: number; y: number };
@@ -68,12 +90,15 @@ function bounds(layer: Layer) {
 
 export default function MapPage() {
   const { data, loaded, error, reload } = useApiData<MapData>("/api/map");
+  const grind = useApiData<Grind>("/api/grind");
+  const grindStatus = new Map((grind.data?.spots ?? []).map((s) => [s.spot_id, s.status]));
+  const focused = useRef(false);
   const viewport = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number; moved: boolean; pointer: number } | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [layerName, setLayerName] = useState("world");
   const [view, setView] = useState<View | null>(null);
-  const [layers, setLayers] = useState({ invested: true, other: false, npcs: true });
+  const [layers, setLayers] = useState({ invested: true, other: false, npcs: true, grind: true });
   const [selection, setSelection] = useState<Selection | null>(null);
   const [query, setQuery] = useState("");
 
@@ -132,25 +157,38 @@ export default function MapPage() {
       (npc) => npc.name.toLowerCase().includes(text) || npc.knowledge.some((k) => k.name.toLowerCase().includes(text)),
     );
     const nodes = data.nodes.filter((node) => node.name.toLowerCase().includes(text));
+    const spots = data.grind.filter((spot) => spot.name.toLowerCase().includes(text));
     return [
+      ...spots.map((spot): Selection => ({ kind: "spot", spot })),
       ...npcs.map((npc): Selection => ({ kind: "npc", npc })),
       ...nodes.map((node): Selection => ({ kind: "node", node })),
     ].slice(0, 8);
   }, [data, query]);
 
   function focus(target: Selection) {
-    const point = target.kind === "npc" ? target.npc : target.node;
+    const point = target.kind === "npc" ? target.npc : target.kind === "spot" ? target.spot : target.node;
     const targetLayer = data?.layers.find((l) => l.name === point.layer);
     setSelection(target);
     setQuery("");
     if (target.kind === "node" && !target.node.invested) setLayers((l) => ({ ...l, other: true }));
     if (target.kind === "npc") setLayers((l) => ({ ...l, npcs: true }));
+    if (target.kind === "spot") setLayers((l) => ({ ...l, grind: true }));
     if (!targetLayer) return;
     setLayerName(targetLayer.name);
     const { px, py } = toMap(targetLayer, point.x, point.z);
     const scale = Math.max(shown?.scale ?? 0, 0.5);
     setView({ scale, x: size.width / 2 - px * scale, y: size.height / 2 - py * scale });
   }
+
+  // Посилання /map/?spot=… (зі сторінки «Гринд») показує це місце, щойно відомий розмір карти.
+  useEffect(() => {
+    if (focused.current || !data || !size.width) return;
+    focused.current = true;
+    const id = Number(new URLSearchParams(window.location.search).get("spot"));
+    const spot = data.grind.find((s) => s.spot_id === id);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- один раз після першого виміру карти; адреса є лише в браузері
+    if (spot) focus({ kind: "spot", spot });
+  });
 
   function switchLayer(name: string) {
     setLayerName(name);
@@ -219,7 +257,11 @@ export default function MapPage() {
     (node) => node.layer === layer?.name && (node.invested ? layers.invested : layers.other),
   );
   const shownNpcs = layers.npcs ? (data?.npcs ?? []).filter((npc) => npc.layer === layer?.name) : [];
-  const selectedKey = selection?.kind === "npc" ? `npc:${selection.npc.npc_id}` : selection ? `node:${selection.node.node_id}` : "";
+  const shownSpots = layers.grind ? (data?.grind ?? []).filter((spot) => spot.layer === layer?.name) : [];
+  const selectedKey =
+    selection?.kind === "npc" ? `npc:${selection.npc.npc_id}`
+      : selection?.kind === "spot" ? `spot:${selection.spot.spot_id}`
+        : selection ? `node:${selection.node.node_id}` : "";
   const ocean = layer?.oceanColor ? `rgb(${layer.oceanColor.join(",")})` : undefined;
 
   return (
@@ -266,6 +308,10 @@ export default function MapPage() {
                   <span className="map-swatch other" /> Інші вузли
                 </label>
                 <label>
+                  <input type="checkbox" checked={layers.grind} onChange={(e) => setLayers({ ...layers, grind: e.target.checked })} />
+                  <span className="map-swatch grind" /> Місця для гринду ({data.grind.length})
+                </label>
+                <label>
                   <input type="checkbox" checked={layers.npcs} onChange={(e) => setLayers({ ...layers, npcs: e.target.checked })} />
                   <span className="map-swatch npc" /> NPC з незібраними знаннями ({data.npcs.length})
                 </label>
@@ -281,13 +327,17 @@ export default function MapPage() {
                 {matches.length > 0 && (
                   <ul className="map-matches">
                     {matches.map((match) => (
-                      <li key={match.kind === "npc" ? `npc-${match.npc.npc_id}` : `node-${match.node.node_id}`}>
+                      <li
+                        key={match.kind === "npc" ? `npc-${match.npc.npc_id}` : match.kind === "spot" ? `spot-${match.spot.spot_id}` : `node-${match.node.node_id}`}
+                      >
                         <button type="button" onClick={() => focus(match)}>
-                          <strong>{match.kind === "npc" ? match.npc.name : match.node.name}</strong>
+                          <strong>{match.kind === "npc" ? match.npc.name : match.kind === "spot" ? match.spot.name : match.node.name}</strong>
                           <span>
                             {match.kind === "npc"
                               ? `${match.npc.region ?? "NPC"} · ${match.npc.knowledge.length} знань`
-                              : `${match.node.territory ?? "Вузол"}${match.node.invested ? " · вкладено" : ""}`}
+                              : match.kind === "spot"
+                                ? `Гринд · ${match.spot.sheet_ap ?? "—"} AP / ${match.spot.sheet_dp ?? "—"} DP`
+                                : `${match.node.territory ?? "Вузол"}${match.node.invested ? " · вкладено" : ""}`}
                           </span>
                         </button>
                       </li>
@@ -335,6 +385,24 @@ export default function MapPage() {
                     />
                   );
                 })}
+                {shownSpots.map((spot) => {
+                  const at = screen(spot.x, spot.z);
+                  if (!at) return null;
+                  const key = `spot:${spot.spot_id}`;
+                  const status = grindStatus.get(spot.spot_id) ?? "unknown";
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      data-marker={key}
+                      className={`map-marker grind ${status}${selectedKey === key ? " selected" : ""}`}
+                      style={at}
+                      title={`${spot.name} — ${spot.sheet_ap ?? "—"} AP / ${spot.sheet_dp ?? "—"} DP`}
+                      aria-label={spot.name}
+                      onClick={() => setSelection({ kind: "spot", spot })}
+                    />
+                  );
+                })}
                 {shownNpcs.map((npc) => {
                   const at = screen(npc.x, npc.z);
                   if (!at) return null;
@@ -363,8 +431,21 @@ export default function MapPage() {
                 {!selection ? (
                   <p className="inventory-muted">
                     Натисни на маркер, щоб побачити, що там. Сині точки — NPC, у яких можна взяти знання, яких у тебе ще
-                    немає; золоті — вкладені вузли.
+                    немає; золоті — вкладені вузли; квадрати — місця для гринду (зелені підходять за AP/DP).
                   </p>
+                ) : selection.kind === "spot" ? (
+                  <>
+                    <div className="eyebrow">{selection.spot.region ?? "ГРИНД"}</div>
+                    <h2>{selection.spot.name}</h2>
+                    <p className="inventory-muted">
+                      Рекомендовано: {selection.spot.sheet_ap ?? "—"} AP / {selection.spot.sheet_dp ?? "—"} DP.
+                      {grind.data?.gear.ap != null && ` У тебе: ${grind.data.gear.ap} AP / ${grind.data.gear.dp} DP.`}
+                    </p>
+                    <p className={`grind-status ${grindStatus.get(selection.spot.spot_id) ?? "unknown"}`}>
+                      {GRIND_LABELS[grindStatus.get(selection.spot.spot_id) ?? "unknown"]}
+                    </p>
+                    <Link className="text-link" href="/grind/">Усі місця для гринду →</Link>
+                  </>
                 ) : selection.kind === "npc" ? (
                   <>
                     <div className="eyebrow">{selection.npc.region ?? "NPC"}</div>

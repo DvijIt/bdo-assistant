@@ -69,7 +69,7 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 6px 35px;
+  padding: 0 6px 24px;
 }
 
 .brand-mark {
@@ -116,21 +116,23 @@ select:focus-visible {
 }
 
 .nav-label {
-  padding: 0 12px 12px;
+  padding: 0 12px 8px;
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 11px 12px;
-  margin-bottom: 4px;
+  padding: 9px 12px;
+  margin-bottom: 2px;
   border: 1px solid transparent;
   border-radius: 7px;
   color: #a5abb5;
@@ -1910,4 +1912,153 @@ a.nav-item {
   .journal-bonus-total .progress-track {
     width: 70px;
   }
+}
+
+/* Гринд і рецепти. */
+.grind-gear {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 10px 0 8px;
+}
+
+.grind-gear label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.grind-gear input,
+.grind-filters select,
+.grind-filters input[type="search"] {
+  padding: 9px 11px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+}
+
+.grind-gear input {
+  width: 110px;
+}
+
+.grind-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.grind-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.grind-filters input[type="search"] {
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+
+.grind-table td small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.grind-table tr.grind-low td {
+  color: var(--muted);
+}
+
+.grind-ok,
+.grind-status.ok {
+  color: #6fbf73;
+}
+
+.grind-close,
+.grind-status.close {
+  color: var(--gold);
+}
+
+.grind-status.low {
+  color: #e58a80;
+}
+
+.grind-status {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.map-swatch.grind,
+.map-marker.grind {
+  border-radius: 2px;
+  background: #8a919c;
+}
+
+.map-marker.grind.ok {
+  background: #6fbf73;
+}
+
+.map-marker.grind.close {
+  background: var(--gold);
+}
+
+.map-marker.grind.low {
+  background: #e58a80;
+}
+
+.recipe-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recipe-list > li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.recipe-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.recipe-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.recipe-title small,
+.recipe-money small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.recipe-money {
+  flex: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.recipe-place {
+  margin: 8px 0 6px;
+  color: #c5cad2;
+  font-size: 12px;
+}
+
+.recipe-list .chip-list small {
+  color: var(--muted);
+}
+
+.recipe-more {
+  margin-top: 12px;
 }

@@ -1,5 +1,6 @@
 
 from contextlib import asynccontextmanager, contextmanager
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -257,7 +258,10 @@ def refresh_prices(full: bool = False):
     with get_connection() as connection:
         item_ids = valuation.item_ids_to_price(connection, include_off_market=full)
         gear_ids = {row[0] for row in connection.execute("SELECT DISTINCT item_id FROM servant_gear")}
-        item_ids = sorted(set(item_ids) | gear_ids)
+        # Результати рецептів, які можна зробити зі складів: без їхніх цін не видно вигоди.
+        known_off_market = {row[0] for row in connection.execute("SELECT item_id FROM prices WHERE base_price = 0")}
+        outputs = {r["output_id"] for r in game_data.craftable(connection, snapshots.current_holdings(connection), {})}
+        item_ids = sorted(set(item_ids) | gear_ids | (outputs if full else outputs - known_off_market))
 
     try:
         entries = arsha.fetch_market(item_ids)
@@ -363,6 +367,49 @@ def get_quests(q: str = ""):
         "open": sum(s == "open" for s in status.values()),
         "quests": found,
     }
+
+
+class GearStats(BaseModel):
+    ap: int = Field(ge=0, le=1000)
+    dp: int = Field(ge=0, le=1000)
+
+
+def _gear(connection) -> dict:
+    row = connection.execute("SELECT value FROM settings WHERE key = 'gear'").fetchone()
+    return json.loads(row[0]) if row else {"ap": None, "dp": None}
+
+
+@app.get("/api/gear")
+def get_gear():
+    """AP/DP персонажа вводить гравець: сервер їх не надсилає, клієнт рахує сам."""
+    with get_connection() as connection:
+        return _gear(connection)
+
+
+@app.put("/api/gear")
+def put_gear(stats: GearStats):
+    with get_connection() as connection:
+        connection.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gear', ?)",
+                           (json.dumps(stats.model_dump()),))
+        return _gear(connection)
+
+
+@app.get("/api/grind")
+def get_grind():
+    with get_connection() as connection:
+        gear = _gear(connection)
+        return {"gear": gear, "spots": game_data.grind_spots(connection, gear["ap"], gear["dp"])}
+
+
+@app.get("/api/recipes")
+def get_recipes():
+    """Що можна зробити з поточного інвентаря й складів (за останнім знімком агента)."""
+    with get_connection() as connection:
+        containers = snapshots.current_holdings(connection)
+        prices = valuation.unit_prices(connection)
+        recipes = game_data.craftable(connection, containers, prices)
+        total = connection.execute("SELECT COUNT(*) FROM game_recipes").fetchone()[0]
+    return {"recipes": recipes, "known": total, "holdings": bool(containers)}
 
 
 @app.get("/api/map")

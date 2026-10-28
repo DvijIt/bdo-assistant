@@ -284,3 +284,45 @@ def test_quests_and_adventure_journals(client, tmp_path):
     (quest,) = found["quests"]
     assert (quest["status"], quest["min_level"], quest["objective"]) == ("done", 50, "Defeat the giant")
     assert quest["requires"] == [{"quest_key": "747-2", "name": "Before It", "status": "done"}]
+
+
+def test_grind_spots_compare_with_entered_gear(client, tmp_path):
+    write(tmp_path / "zones.json", [
+        {"key": 1, "name": "Easy Camp", "mainCategory": {"name": "Testland"}, "sheetAP": 300, "sheetDP": 350,
+         "node": {"pos": [1000.0, 0.0, 2000.0]}},
+        {"key": 2, "name": "Almost", "sheetAP": 380, "sheetDP": 440, "node": {}},
+        {"key": 3, "name": "Too Hard", "sheetAP": 500, "sheetDP": 600, "node": {}},
+    ])
+    client.post("/api/game-data/import", json={"path": str(tmp_path)})
+    assert [s["status"] for s in client.get("/api/grind").json()["spots"]] == ["unknown"] * 3
+
+    assert client.put("/api/gear", json={"ap": 360, "dp": 423}).json() == {"ap": 360, "dp": 423}
+    spots = client.get("/api/grind").json()["spots"]
+    assert [(s["name"], s["status"], s["on_map"]) for s in spots] == [
+        ("Easy Camp", "ok", True), ("Almost", "close", False), ("Too Hard", "low", False)]
+    assert client.put("/api/gear", json={"ap": -1, "dp": 1}).status_code == 422
+
+
+def test_recipes_from_holdings(client, tmp_path):
+    write(tmp_path / "recipes.json", [
+        {"urn": "urn::recipe:9213:0", "output": "urn::item:9213", "type": "COOK",
+         "inputs": [{"item": "urn::item:7005", "count": 5}, {"item": "urn::item:9059", "count": 6}]},
+        {"urn": "urn::recipe:1:0", "output": "urn::item:1", "type": "HEAT",
+         "inputs": [{"item": "urn::item:404", "count": 1}]},
+        {"urn": "urn::recipe:2:0", "output": "urn::item:2", "type": "HEAT", "byproductOf": "x",
+         "inputs": [{"item": "urn::item:7005", "count": 1}]},
+    ])
+    client.post("/api/game-data/import", json={"path": str(tmp_path)})
+    containers = [
+        {"id": 1, "kind": "storage", "name": "Velia", "character": None,
+         "items": [{"item_id": 7005, "quantity": 12}, {"item_id": 9059, "quantity": 6}]},
+        {"id": 2, "kind": "inventory", "name": "Main Inventory", "character": "Mobix",
+         "items": [{"item_id": 9059, "quantity": 6}]},
+    ]
+    with main.get_connection() as connection:
+        recipes = main.game_data.craftable(connection, containers, {(9213, 0): 1000, (7005, 0): 10, (9059, 0): 20})
+    (beer,) = recipes  # 404 немає, побічний продукт пропущено
+    assert (beer["type_label"], beer["times"], beer["best_place"], beer["best_times"], beer["value"]) == (
+        "Кулінарія", 2, "Velia", 1, 2000)
+    assert (beer["cost"], beer["profit"]) == (2 * (5 * 10 + 6 * 20), 2000 - 340)
+    assert [(i["item_id"], i["have"]) for i in beer["inputs"]] == [(7005, 12), (9059, 12)]

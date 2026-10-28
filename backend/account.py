@@ -106,6 +106,12 @@ SCHEMA = """
         PRIMARY KEY (character_id, group_id, quest_index, status)
     );
 
+    -- Те, що гравець вводить сам (AP/DP: сервер їх не надсилає). value — JSON.
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+
     -- Стан вузлів сім'ї: invested = 1, якщо у вузол вкладено очки внеску.
     CREATE TABLE IF NOT EXISTS nodes (
         node_id INTEGER PRIMARY KEY,
