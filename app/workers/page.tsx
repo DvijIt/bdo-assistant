@@ -1,6 +1,6 @@
 "use client";
 
-import { AccountPage, useApiData } from "../_components/AccountPage";
+import { AccountPage, EmptyState, useApiData } from "../_components/AccountPage";
 
 type Worker = {
   worker_id: string;
@@ -26,7 +26,6 @@ export default function WorkersPage() {
 
   return (
     <AccountPage
-      active="/workers/"
       title="Робітники"
       subtitle="Список робітників приходить один раз при вході у світ. Швидкість роботи, пересування й удачу гра рахує сама — сервер їх не надсилає."
       onRecords={reload}
@@ -49,11 +48,7 @@ export default function WorkersPage() {
       {error && <p className="inventory-feedback error">{error}</p>}
 
       {data !== null && workers.length === 0 ? (
-        <div className="inventory-empty panel">
-          <span>◇</span>
-          <strong>Робітників ще немає</strong>
-          <p>Увімкни агента й зайди персонажем у світ.</p>
-        </div>
+        <EmptyState title="Робітників ще немає">Увімкни агента й зайди персонажем у світ.</EmptyState>
       ) : (
         [...towns.entries()].map(([town, group]) => (
           <section className="panel account-group" key={town}>

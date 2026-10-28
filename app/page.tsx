@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { AgentBar, useApiData } from "./_components/AccountPage";
+import { AccountPage, useApiData } from "./_components/AccountPage";
 import { formatSeen, formatSilver } from "./_lib/api";
 
 type Family = {
@@ -40,6 +40,8 @@ type Knowledge = { total: number; ecology_points: number | null };
 
 type Snapshot = { id: number };
 
+type GameData = { imported_at: number } | null;
+
 type Attention = { key: string; title: string; detail: string; href: string };
 
 // Нижче цієї частки міцності спорядження варто полагодити.
@@ -53,6 +55,7 @@ function attentionItems(
   servants: Servants["servants"],
   snapshots: Snapshot[] | null,
   account: Account | null,
+  gameData: GameData | undefined,
 ): Attention[] {
   const items: Attention[] = [];
 
@@ -63,7 +66,7 @@ function attentionItems(
       key: "workers",
       title: `${tired.length} робітн. без витривалості`,
       detail: `Нагодуй їх, щоб відновити роботу: ${towns}.`,
-      href: "/workers",
+      href: "/workers/",
     });
   }
 
@@ -78,7 +81,7 @@ function attentionItems(
       key: "gear",
       title: `${worn.length} предм. спорядження зношено`,
       detail: worn.join(" · "),
-      href: "/transport",
+      href: "/transport/",
     });
   }
 
@@ -88,7 +91,7 @@ function attentionItems(
         key: `level-${character.character_id}`,
         title: `${character.nick} близько до Lv. ${(character.level ?? 0) + 1}`,
         detail: `Досвід ${character.xp_percent.toFixed(1)}% — трохи гринду до нового рівня.`,
-        href: "/characters",
+        href: "/characters/",
       });
     }
   }
@@ -98,19 +101,34 @@ function attentionItems(
       key: "inventory",
       title: "Знімків інвентаря ще немає",
       detail: "Увімкни агента й зайди персонажем у світ — інвентар і склади знімуться самі.",
-      href: "/inventory",
+      href: "/inventory/",
     });
   } else if (account && (!account.prices_fetched_at || account.unpriced_stacks > account.priced_stacks)) {
     items.push({
       key: "prices",
       title: account.prices_fetched_at ? "Більшість предметів без ціни" : "Ціни ринку не завантажені",
       detail: "Без них вартість акаунта неповна. Онови ціни на сторінці ресурсів.",
-      href: "/inventory",
+      href: "/inventory/",
+    });
+  }
+
+  if (gameData === null) {
+    items.push({
+      key: "game-data",
+      title: "Назви з клієнта гри не імпортовано",
+      detail: "Без них робітники, транспорт і знання показуються номерами. Імпортуй вивід bdo-data-extractor.",
+      href: "/game-data/",
     });
   }
 
   return items;
 }
+
+const FIRST_STEPS = [
+  { title: "Увімкни агента", detail: "Кнопка вгорі. Агент лише слухає трафік гри, нічого не надсилає." },
+  { title: "Зайди персонажем у світ", detail: "Персонажі, робітники, транспорт, знання й склади приходять саме при вході." },
+  { title: "Імпортуй дані гри", detail: "Назви, іконки й картинки — з твого клієнта, на сторінці «Дані гри»." },
+];
 
 export default function Home() {
   const family = useApiData<Family>("/api/family");
@@ -120,9 +138,11 @@ export default function Home() {
   const servants = useApiData<Servants>("/api/servants");
   const knowledge = useApiData<Knowledge>("/api/knowledge");
   const snapshots = useApiData<Snapshot[]>("/api/snapshots");
+  const gameData = useApiData<GameData>("/api/game-data");
+  const sources = [family, characters, account, workers, servants, knowledge, snapshots, gameData];
 
   function reloadAll() {
-    for (const source of [family, characters, account, workers, servants, knowledge, snapshots]) source.reload();
+    for (const source of sources) source.reload();
   }
 
   const list = characters.data ?? [];
@@ -132,199 +152,145 @@ export default function Home() {
   );
   const fame = family.data?.fame;
   const attention = attentionItems(list, workers.data ?? [], servants.data?.servants ?? [], snapshots.data,
-    account.data);
-  const error = [family, characters, account, workers, servants, knowledge, snapshots].find((s) => s.error)?.error;
+    account.data, gameData.loaded ? gameData.data : undefined);
+  const error = sources.find((s) => s.error)?.error;
+  const loaded = characters.data !== null;
   const hasData = list.length > 0;
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">B</div>
-          <div>
-            <strong>BDO COMPANION</strong>
-            <span>PERSONAL ADVENTURE</span>
-          </div>
-        </div>
+    <AccountPage
+      title={family.data?.name ? `Сім'я ${family.data.name}` : "Огляд"}
+      subtitle={
+        hasData && family.data
+          ? `Дані оновлено ${formatSeen(family.data.updated_at)}. Усе приходить з трафіку гри при вході персонажем у світ.`
+          : "Агент пасивно читає трафік гри: персонажі, робітники, транспорт, знання, інвентар і склади з'являються тут самі."
+      }
+      onRecords={reloadAll}
+    >
+      {error && <p className="inventory-feedback error">{error}</p>}
 
-        <div className="nav-label">WORKSPACE</div>
-        <div className="nav-item active">◈ <span>Огляд</span></div>
-        <Link href="/characters" className="nav-item">⚔ <span>Мої персонажі</span></Link>
-        <Link href="/inventory" className="nav-item">◉ <span>Мої ресурси</span></Link>
-        <Link href="/workers" className="nav-item">⚒ <span>Робітники</span></Link>
-        <Link href="/transport" className="nav-item">⚓ <span>Транспорт</span></Link>
-        <Link href="/knowledge" className="nav-item">✦ <span>Знання</span></Link>
-        <Link href="/game-data" className="nav-item">⚙ <span>Дані гри</span></Link>
-
-        <div className="sidebar-bottom">
-          <div className="connection-dot" />
-          <div>
-            <strong>Локальний режим</strong>
-            <span>Дані з трафіку гри</span>
-          </div>
-        </div>
-      </aside>
-
-      <section className="main-content">
-        <header className="topbar">
-          <div>
-            <div className="eyebrow">BLACK DESERT ONLINE / EU</div>
-            <h1>{family.data?.name ?? "Твоя пригода"}<span className="gold">.</span></h1>
-          </div>
-        </header>
-
-        <AgentBar onRecords={reloadAll} />
-
-        {error && <p className="inventory-feedback error">{error}. Перевір, що API запущено.</p>}
-
-        <section className="welcome-panel">
-          <div className="welcome-copy">
-            <div className="eyebrow gold-text">СІМ&apos;Я{family.data?.name ? ` ${family.data.name.toUpperCase()}` : ""}</div>
-            {hasData ? (
-              <h2>
-                {list.length} персонаж{list.length === 1 ? "" : "ів"}
-                <br />
-                слава {fame ? fame.total.toLocaleString("uk-UA") : "—"}
-              </h2>
-            ) : (
-              <h2>Зайди в гру<br />з увімкненим агентом.</h2>
-            )}
-            <p>
-              {hasData && family.data
-                ? `Дані оновлено ${formatSeen(family.data.updated_at)}. Усе приходить з трафіку гри при вході персонажем у світ.`
-                : "Агент пасивно читає трафік гри: персонажі, робітники, транспорт, знання, інвентар і склади з'являться тут самі."}
-            </p>
-            <Link className="primary-button" href="/characters">
-              Мої персонажі <span>→</span>
-            </Link>
-          </div>
-          <div className="hero-emblem" aria-hidden="true">
-            <div className="emblem-ring">
-              <div className="emblem-inner">B</div>
-            </div>
-            <span>ADVENTURER</span>
-          </div>
-          <div className="welcome-decoration">BLACK DESERT</div>
+      {loaded && !hasData && (
+        <section className="panel account-group">
+          <div className="eyebrow">З ЧОГО ПОЧАТИ</div>
+          <ol className="first-steps">
+            {FIRST_STEPS.map((step, index) => (
+              <li key={step.title}>
+                <span className="task-number">{String(index + 1).padStart(2, "0")}</span>
+                <span className="task-copy">
+                  <strong>{step.title}</strong>
+                  <span>{step.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
         </section>
+      )}
 
-        <div className="section-heading">
-          <div>
-            <div className="eyebrow">ACCOUNT OVERVIEW</div>
-            <h2>Акаунт</h2>
+      <section className="stats-grid">
+        <Link className="stat-card" href="/characters/">
+          <div className="stat-top">
+            <span className="stat-icon" aria-hidden="true">✧</span>
+            <span className="muted-label">СЛАВА СІМ&apos;Ї</span>
           </div>
-        </div>
-
-        <section className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-top">
-              <span className="stat-icon">✧</span>
-              <span className="muted-label">СЛАВА СІМ&apos;Ї</span>
-            </div>
-            <div className="stat-value">{fame ? fame.total.toLocaleString("uk-UA") : "—"}</div>
-            <div className="stat-caption">
-              {fame ? `Бій ${fame.combat} · Життя ${fame.life} · Інша ${fame.third}` : "Після входу персонажем"}
-            </div>
+          <div className="stat-value">{fame ? fame.total.toLocaleString("uk-UA") : "—"}</div>
+          <div className="stat-caption">
+            {fame ? `Бій ${fame.combat} · Життя ${fame.life} · Інша ${fame.third}` : "Після входу персонажем"}
           </div>
+        </Link>
 
-          <div className="stat-card character-card">
-            <div className="stat-top">
-              <span className="stat-icon">⚔</span>
-              <span className="muted-label">НАЙВИЩИЙ РІВЕНЬ</span>
-            </div>
-            <div className="stat-value">{top ? `Lv. ${top.level ?? "—"}` : "—"}</div>
-            <div className="stat-caption">{top ? `${top.nick} · ${top.class_name ?? "клас невідомий"}` : "Немає персонажів"}</div>
+        <Link className="stat-card character-card" href="/characters/">
+          <div className="stat-top">
+            <span className="stat-icon" aria-hidden="true">⚔</span>
+            <span className="muted-label">НАЙВИЩИЙ РІВЕНЬ</span>
           </div>
+          <div className="stat-value">{top ? `Lv. ${top.level ?? "—"}` : "—"}</div>
+          <div className="stat-caption">{top ? `${top.nick} · ${top.class_name ?? "клас невідомий"}` : "Немає персонажів"}</div>
+        </Link>
 
-          <div className="stat-card">
-            <div className="stat-top">
-              <span className="stat-icon">◈</span>
-              <span className="muted-label">ВАРТІСТЬ АКАУНТА</span>
-            </div>
-            <div className="stat-value">
-              {account.data?.prices_fetched_at ? formatSilver(account.data.total_value) : "—"}
-            </div>
-            <div className="stat-caption">
-              {account.data ? `Срібло ${formatSilver(account.data.silver)}` : "Після знімка інвентаря"}
-            </div>
+        <Link className="stat-card" href="/inventory/">
+          <div className="stat-top">
+            <span className="stat-icon" aria-hidden="true">◈</span>
+            <span className="muted-label">ВАРТІСТЬ АКАУНТА</span>
           </div>
-
-          <div className="stat-card">
-            <div className="stat-top">
-              <span className="stat-icon">✦</span>
-              <span className="muted-label">ЗНАННЯ</span>
-            </div>
-            <div className="stat-value">{knowledge.data?.total ? knowledge.data.total.toLocaleString("uk-UA") : "—"}</div>
-            <div className="stat-caption">
-              {knowledge.data?.ecology_points != null ? `Очки екології ${knowledge.data.ecology_points}` : "Після входу персонажем"}
-            </div>
+          <div className="stat-value">
+            {account.data?.prices_fetched_at ? formatSilver(account.data.total_value) : "—"}
           </div>
-        </section>
+          <div className="stat-caption">
+            {account.data ? `Срібло ${formatSilver(account.data.silver)}` : "Після знімка інвентаря"}
+          </div>
+        </Link>
 
-        <div className="content-grid">
-          <section className="panel">
-            <div className="panel-heading">
-              <div>
-                <div className="eyebrow">NEEDS ATTENTION</div>
-                <h2>Потребує уваги</h2>
-              </div>
-            </div>
-
-            {attention.length === 0 ? (
-              <p className="panel-description">
-                {hasData ? "Усе гаразд: робітники мають витривалість, спорядження ціле." : "Даних ще немає."}
-              </p>
-            ) : (
-              <div className="task-list">
-                {attention.map((item, index) => (
-                  <Link className="task-item" href={item.href} key={item.key}>
-                    <span className="task-number">{String(index + 1).padStart(2, "0")}</span>
-                    <span className="task-copy">
-                      <strong>{item.title}</strong>
-                      <span>{item.detail}</span>
-                    </span>
-                    <span className="task-arrow">→</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="panel">
-            <div className="panel-heading">
-              <div>
-                <div className="eyebrow">CHARACTERS</div>
-                <h2>Персонажі</h2>
-              </div>
-              <Link className="text-button" href="/characters">Усі →</Link>
-            </div>
-
-            {list.length === 0 ? (
-              <p className="panel-description">Персонажі з&apos;являться після входу ними у світ.</p>
-            ) : (
-              <ul className="home-characters">
-                {list.map((character) => (
-                  <li key={character.character_id}>
-                    <div className="progress-row">
-                      <span>
-                        <strong>{character.nick}</strong> · {character.class_name ?? "клас невідомий"}
-                      </span>
-                      <strong>Lv. {character.level ?? "—"}</strong>
-                    </div>
-                    <div className="progress-track">
-                      <div className="progress-fill" style={{ width: `${Math.min(character.xp_percent ?? 0, 100)}%` }} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
-
-        <footer>
-          <span>BDO COMPANION <span className="gold">/</span> PERSONAL PROJECT</span>
-          <span>Неофіційний фан-проєкт · Не пов’язаний із Pearl Abyss</span>
-        </footer>
+        <Link className="stat-card" href="/knowledge/">
+          <div className="stat-top">
+            <span className="stat-icon" aria-hidden="true">✦</span>
+            <span className="muted-label">ЗНАННЯ</span>
+          </div>
+          <div className="stat-value">{knowledge.data?.total ? knowledge.data.total.toLocaleString("uk-UA") : "—"}</div>
+          <div className="stat-caption">
+            {knowledge.data?.ecology_points != null ? `Очки екології ${knowledge.data.ecology_points}` : "Після входу персонажем"}
+          </div>
+        </Link>
       </section>
-    </main>
+
+      <div className="content-grid">
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <div className="eyebrow">ЩО ЗРОБИТИ</div>
+              <h2>Потребує уваги</h2>
+            </div>
+          </div>
+
+          {attention.length === 0 ? (
+            <p className="panel-description">
+              {hasData ? "Усе гаразд: робітники мають витривалість, спорядження ціле." : "Даних ще немає."}
+            </p>
+          ) : (
+            <div className="task-list">
+              {attention.map((item, index) => (
+                <Link className="task-item" href={item.href} key={item.key}>
+                  <span className="task-number">{String(index + 1).padStart(2, "0")}</span>
+                  <span className="task-copy">
+                    <strong>{item.title}</strong>
+                    <span>{item.detail}</span>
+                  </span>
+                  <span className="task-arrow" aria-hidden="true">→</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <div className="eyebrow">ПЕРСОНАЖІ</div>
+              <h2>Рівні</h2>
+            </div>
+            <Link className="text-button" href="/characters/">Усі →</Link>
+          </div>
+
+          {list.length === 0 ? (
+            <p className="panel-description">Персонажі з&apos;являться після входу ними у світ.</p>
+          ) : (
+            <ul className="home-characters">
+              {list.map((character) => (
+                <li key={character.character_id}>
+                  <div className="progress-row">
+                    <span>
+                      <strong>{character.nick}</strong> · {character.class_name ?? "клас невідомий"}
+                    </span>
+                    <strong>Lv. {character.level ?? "—"}</strong>
+                  </div>
+                  <div className="progress-track">
+                    <div className="progress-fill" style={{ width: `${Math.min(character.xp_percent ?? 0, 100)}%` }} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </AccountPage>
   );
 }

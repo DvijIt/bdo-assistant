@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { AccountPage, useApiData } from "../_components/AccountPage";
+import { AccountPage, EmptyState, useApiData } from "../_components/AccountPage";
 import { GameImage } from "../_components/GameImage";
 import { fetchJson, formatSilver } from "../_lib/api";
 
@@ -61,9 +61,8 @@ export default function TransportPage() {
 
   return (
     <AccountPage
-      active="/transport/"
       title="Транспорт"
-      subtitle="Коні, кораблі й табір сім'ї зі спорядженням і його міцністю. Назви й ціни предметів — з бази arsha.io та Central Market EU."
+      subtitle="Коні, кораблі й табір сім'ї зі спорядженням і його міцністю. Назви й іконки — з твого клієнта гри, ціни — з Central Market EU (arsha.io)."
       onRecords={reload}
     >
       {servants.length > 0 && (
@@ -89,11 +88,7 @@ export default function TransportPage() {
       {(error || actionError) && <p className="inventory-feedback error">{error || actionError}</p>}
 
       {data !== null && servants.length === 0 ? (
-        <div className="inventory-empty panel">
-          <span>◇</span>
-          <strong>Транспорту ще немає</strong>
-          <p>Увімкни агента й зайди персонажем у світ.</p>
-        </div>
+        <EmptyState title="Транспорту ще немає">Увімкни агента й зайди персонажем у світ.</EmptyState>
       ) : (
         groups.map(({ key, label }) => {
           const group = servants.filter((servant) => servant.category === key);

@@ -1,17 +1,27 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useRef, useState } from "react";
 
 import { AgentStatus, fetchJson, formatSeen } from "../_lib/api";
 
-const PAGES = [
-  { href: "/characters/", label: "Персонажі" },
-  { href: "/workers/", label: "Робітники" },
-  { href: "/transport/", label: "Транспорт" },
-  { href: "/knowledge/", label: "Знання" },
-  { href: "/inventory/", label: "Ресурси" },
-  { href: "/game-data/", label: "Дані гри" },
+const SECTIONS: { label: string; pages: { href: string; icon: string; label: string }[] }[] = [
+  {
+    label: "АКАУНТ",
+    pages: [
+      { href: "/", icon: "◈", label: "Огляд" },
+      { href: "/characters/", icon: "⚔", label: "Персонажі" },
+      { href: "/inventory/", icon: "◉", label: "Ресурси" },
+      { href: "/workers/", icon: "⚒", label: "Робітники" },
+      { href: "/transport/", icon: "⚓", label: "Транспорт" },
+      { href: "/knowledge/", icon: "✦", label: "Знання" },
+    ],
+  },
+  {
+    label: "НАЛАШТУВАННЯ",
+    pages: [{ href: "/game-data/", icon: "⚙", label: "Дані гри" }],
+  },
 ];
 
 const STATE_LABELS: Record<AgentStatus["state"], string> = {
@@ -35,7 +45,7 @@ function inventoryLine(inventory: AgentStatus["inventory"]) {
 }
 
 /** Стан агента з опитуванням; `onRecords` викликається, коли агент записав нові дані. */
-export function useAgent(onRecords: () => void) {
+function useAgent(onRecords: () => void) {
   const [agent, setAgent] = useState<AgentStatus | null>(null);
   const [agentError, setAgentError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -58,7 +68,7 @@ export function useAgent(onRecords: () => void) {
         if (records.current !== null && status.records !== records.current) reload.current();
         records.current = status.records;
       } catch {
-        if (!cancelled) setAgentError("API недоступний — перевір, що бекенд запущено.");
+        if (!cancelled) setAgentError("API недоступний — перевір, що застосунок запущено.");
       }
     }
 
@@ -87,15 +97,15 @@ export function useAgent(onRecords: () => void) {
   return { agent, agentError, busy, running, toggleAgent };
 }
 
-/** Панель агента: стан, лічильники, знімки інвентаря й кнопка ввімкнення. */
-export function AgentBar({ onRecords }: { onRecords: () => void }) {
-  const { agent, agentError, busy, running, toggleAgent } = useAgent(onRecords);
+type Agent = ReturnType<typeof useAgent>;
 
+/** Панель агента: стан, лічильники, знімки інвентаря й кнопка ввімкнення. */
+function AgentBar({ agent: { agent, agentError, busy, running, toggleAgent } }: { agent: Agent }) {
   return (
-    <section className={`agent-bar ${agent?.state ?? "unknown"}`}>
+    <section className={`agent-bar ${agentError ? "error" : agent?.state ?? "unknown"}`}>
       <div className="connection-dot" />
       <div className="agent-bar-copy">
-        <strong>{agent ? STATE_LABELS[agent.state] : "Стан агента невідомий"}</strong>
+        <strong>{agentError ? "Немає зв'язку з застосунком" : agent ? STATE_LABELS[agent.state] : "Перевіряю агента…"}</strong>
         <span>
           {agentError ||
             agent?.error ||
@@ -106,58 +116,110 @@ export function AgentBar({ onRecords }: { onRecords: () => void }) {
         </span>
         {agent && running && <span>{inventoryLine(agent.inventory)}</span>}
       </div>
-      <button className="outline-button" type="button" onClick={() => void toggleAgent()} disabled={!agent || busy}>
+      <button
+        className={running ? "outline-button" : "primary-button"}
+        type="button"
+        onClick={() => void toggleAgent()}
+        disabled={!agent || busy}
+      >
         {running ? "■ Зупинити" : "▶ Увімкнути агента"}
       </button>
     </section>
   );
 }
 
-/** Каркас сторінок акаунта: шапка, навігація й панель агента.
+function normalize(path: string) {
+  return path.length > 1 ? path.replace(/\/$/, "") : path;
+}
+
+/** Каркас усіх сторінок: бічна навігація, заголовок і панель агента.
  * `onRecords` викликається, коли агент записав нові дані — сторінка перезавантажує свої. */
 export function AccountPage({
-  active,
   title,
   subtitle,
   onRecords,
   children,
 }: {
-  active: string;
   title: string;
-  subtitle: string;
+  subtitle?: ReactNode;
   onRecords: () => void;
   children: ReactNode;
 }) {
+  const pathname = normalize(usePathname() ?? "/");
+  const agent = useAgent(onRecords);
+  const state = agent.agentError ? "error" : agent.agent?.state ?? "unknown";
+
+  // На телефоні меню — смуга, що гортається: показуємо в ній поточний розділ.
+  useEffect(() => {
+    document.querySelector(".sidebar-nav .nav-item.active")?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [pathname]);
+
   return (
-    <main className="inventory-page">
-      <header className="inventory-header">
-        <Link href="/" className="inventory-back">← Головна панель</Link>
-        <div className="eyebrow">BLACK DESERT ONLINE / EU</div>
-        <h1>{title}<span className="gold">.</span></h1>
-        <p className="inventory-subtitle">{subtitle}</p>
-        <nav className="account-nav">
-          {PAGES.map((page) => (
-            <Link key={page.href} href={page.href} className={page.href === active ? "active" : undefined}>
-              {page.label}
-            </Link>
+    <div className="app-shell">
+      <aside className="sidebar">
+        <Link href="/" className="brand">
+          <div className="brand-mark">B</div>
+          <div>
+            <strong>BDO COMPANION</strong>
+            <span>BLACK DESERT · EU</span>
+          </div>
+        </Link>
+
+        <nav className="sidebar-nav" aria-label="Розділи">
+          {SECTIONS.map((section) => (
+            <div className="nav-section" key={section.label}>
+              <div className="nav-label">{section.label}</div>
+              {section.pages.map((page) => {
+                const active = normalize(page.href) === pathname;
+                return (
+                  <Link
+                    key={page.href}
+                    href={page.href}
+                    className={`nav-item${active ? " active" : ""}`}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <span aria-hidden="true">{page.icon}</span>
+                    <span>{page.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
           ))}
         </nav>
-      </header>
 
-      <AgentBar onRecords={onRecords} />
+        <div className={`sidebar-bottom agent-state ${state}`}>
+          <div className="connection-dot" />
+          <div>
+            <strong>{agent.agentError ? "Немає зв'язку" : agent.agent ? STATE_LABELS[agent.agent.state] : "…"}</strong>
+            <span>Дані з трафіку гри</span>
+          </div>
+        </div>
+      </aside>
 
-      {children}
+      <main className="main-content">
+        <header className="page-header">
+          <div className="eyebrow">BLACK DESERT ONLINE / EU</div>
+          <h1>{title}<span className="gold">.</span></h1>
+          {subtitle && <p className="page-subtitle">{subtitle}</p>}
+        </header>
 
-      <footer className="inventory-footer">
-        BDO COMPANION / Локальний прототип · Неофіційний фан-проєкт
-      </footer>
-    </main>
+        <AgentBar agent={agent} />
+
+        {children}
+
+        <footer className="page-footer">
+          <span>BDO COMPANION <span className="gold">/</span> ЛОКАЛЬНО НА ТВОЄМУ ПК</span>
+          <span>Неофіційний фан-проєкт · Не пов’язаний із Pearl Abyss</span>
+        </footer>
+      </main>
+    </div>
   );
 }
 
 /** Завантажує дані сторінки й перезавантажує їх на вимогу (`reload`). */
 export function useApiData<T>(path: string) {
   const [data, setData] = useState<T | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
 
@@ -167,16 +229,29 @@ export function useApiData<T>(path: string) {
       .then((next) => {
         if (!cancelled) {
           setData(next);
+          setLoaded(true);
           setError("");
         }
       })
       .catch((err: Error) => {
-        if (!cancelled) setError(`${err.message}. Перевір, що API запущено.`);
+        if (!cancelled) setError(`${err.message}. Перевір, що застосунок запущено.`);
       });
     return () => {
       cancelled = true;
     };
   }, [path, version]);
 
-  return { data, error, reload: () => setVersion((v) => v + 1) };
+  // `loaded` відрізняє відповідь null (даних немає) від ще не отриманої відповіді.
+  return { data, loaded, error, reload: () => setVersion((v) => v + 1) };
+}
+
+/** Порожній стан розділу: що зробити, щоб дані з'явились. */
+export function EmptyState({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="inventory-empty panel">
+      <span aria-hidden="true">◇</span>
+      <strong>{title}</strong>
+      <p>{children}</p>
+    </div>
+  );
 }

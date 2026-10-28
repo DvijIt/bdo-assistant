@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
-import { ChangeEvent, useEffect, useState } from "react";
+import { useState } from "react";
 
+import { AccountPage, EmptyState, useApiData } from "../_components/AccountPage";
 import { GameImage } from "../_components/GameImage";
-import { API } from "../_lib/api";
+import { fetchJson, formatSilver } from "../_lib/api";
 
 type ContainerKind = "inventory" | "currency" | "storage";
 
@@ -77,35 +77,6 @@ const kindLabels: Record<ContainerKind, string> = {
   storage: "Склади міст",
 };
 
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, init);
-  if (!response.ok) {
-    let detail = "";
-    try {
-      detail = (await response.json()).detail ?? "";
-    } catch {
-      // Тіло відповіді не JSON — лишаємо загальне повідомлення.
-    }
-    throw new Error(detail || `Помилка API: ${response.status}`);
-  }
-  return response.json();
-}
-
-function loadAll() {
-  return Promise.all([
-    fetchJson<Holdings>("/api/holdings"),
-    fetchJson<Snapshot[]>("/api/snapshots"),
-    fetchJson<Account>("/api/account"),
-  ]);
-}
-
-// Срібло в BDO рахують мільйонами й мільярдами.
-function formatSilver(value: number) {
-  if (value >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
-  if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-  return value.toLocaleString("uk-UA");
-}
-
 function itemLabel(item: { name: string | null; item_id: number; enhancement: number }) {
   const name = item.name ?? `Предмет #${item.item_id}`;
   return item.enhancement > 0 ? `+${item.enhancement} ${name}` : name;
@@ -119,288 +90,127 @@ function formatDate(value: string) {
 }
 
 export default function InventoryPage() {
-  const [holdings, setHoldings] = useState<Holdings | null>(null);
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const [account, setAccount] = useState<Account | null>(null);
-  const [loading, setLoading] = useState(true);
+  const holdings = useApiData<Holdings>("/api/holdings");
+  const snapshots = useApiData<Snapshot[]>("/api/snapshots");
+  const account = useApiData<Account>("/api/account");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  function applyLoaded([nextHoldings, nextSnapshots, nextAccount]: [Holdings, Snapshot[], Account]) {
-    setHoldings(nextHoldings);
-    setSnapshots(nextSnapshots);
-    setAccount(nextAccount);
+  function reloadAll() {
+    holdings.reload();
+    snapshots.reload();
+    account.reload();
   }
 
-  useEffect(() => {
-    let cancelled = false;
-
-    loadAll()
-      .then((data) => {
-        if (!cancelled) applyLoaded(data);
-      })
-      .catch((err: Error) => {
-        if (!cancelled) setError(`${err.message}. Перевір, що API запущено.`);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function handleFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-
+  async function run(path: string, pending: string, done: (result: { requested?: number }) => string) {
     setBusy(true);
     setError("");
-    setMessage("");
-
+    setMessage(pending);
     try {
-      let data: unknown;
-      try {
-        data = JSON.parse(await file.text());
-      } catch {
-        throw new Error("Файл не є коректним JSON.");
-      }
-
-      const summary = await fetchJson<{
-        inventory_stacks: number;
-        storage_stacks: number;
-        missing_names: number;
-      }>("/api/snapshots", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-
-      applyLoaded(await loadAll());
-      setMessage(
-        `Знімок імпортовано: ${summary.inventory_stacks} стеків в інвентарі, ` +
-          `${summary.storage_stacks} на складах.` +
-          (summary.missing_names
-            ? ` Без назви лишилось ${summary.missing_names} предметів.`
-            : "")
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не вдалося імпортувати знімок.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function refreshNames() {
-    setBusy(true);
-    setError("");
-
-    try {
-      await fetchJson("/api/items/refresh", { method: "POST" });
-      applyLoaded(await loadAll());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не вдалося оновити назви.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function refreshPrices() {
-    setBusy(true);
-    setError("");
-    setMessage("Оновлюю ціни з ринку. Перший раз це може тривати до хвилини...");
-
-    try {
-      const result = await fetchJson<{ requested: number }>("/api/prices/refresh", {
-        method: "POST",
-      });
-      applyLoaded(await loadAll());
-      setMessage(`Ціни оновлено для ${result.requested} предметів.`);
+      const result = await fetchJson<{ requested?: number }>(path, { method: "POST" });
+      reloadAll();
+      setMessage(done(result));
     } catch (err) {
       setMessage("");
-      setError(err instanceof Error ? err.message : "Не вдалося оновити ціни.");
+      setError(err instanceof Error ? err.message : "Не вдалося оновити.");
     } finally {
       setBusy(false);
     }
   }
 
-  const containers = holdings?.containers ?? [];
-  const containerValues = new Map(
-    (account?.by_container ?? []).map((container) => [container.id, container.value])
-  );
+  const containers = holdings.data?.containers ?? [];
+  const missingNames = holdings.data?.missing_names ?? 0;
+  const value = account.data;
+  const containerValues = new Map((value?.by_container ?? []).map((container) => [container.id, container.value]));
+  const loadError = holdings.error || snapshots.error || account.error;
 
   return (
-    <main className="inventory-page">
-      <header className="inventory-header">
-        <Link href="/" className="inventory-back">← Головна панель</Link>
-        <div className="eyebrow">BLACK DESERT ONLINE / EU</div>
-        <h1>Мій інвентар<span className="gold">.</span></h1>
-        <p className="inventory-subtitle">
-          Предмети зі знімків bdo-toolkit: для кожного складу й вкладки
-          показано останній стан, який бачив знімок. Вартість — за базовою
-          ціною Central Market EU (arsha.io), до вирахування податку.
-        </p>
-      </header>
-
+    <AccountPage
+      title="Ресурси"
+      subtitle="Інвентар і склади з останнього знімка агента: для кожного складу показано стан, який він бачив востаннє. Вартість — за базовою ціною Central Market EU (arsha.io), до податку."
+      onRecords={reloadAll}
+    >
       <section className="inventory-summary">
         <div>
           <span className="muted-label">ВАРТІСТЬ АКАУНТА</span>
-          <strong>{account?.prices_fetched_at ? formatSilver(account.total_value) : "—"}</strong>
+          <strong>{value?.prices_fetched_at ? formatSilver(value.total_value) : "—"}</strong>
         </div>
         <div>
           <span className="muted-label">ПРЕДМЕТИ ЗА РИНКОМ</span>
-          <strong>{account?.prices_fetched_at ? formatSilver(account.items_value) : "—"}</strong>
+          <strong>{value?.prices_fetched_at ? formatSilver(value.items_value) : "—"}</strong>
         </div>
         <div>
           <span className="muted-label">СРІБЛО В ІНВЕНТАРІ</span>
-          <strong>{account ? formatSilver(account.silver) : "—"}</strong>
+          <strong>{value ? formatSilver(value.silver) : "—"}</strong>
         </div>
       </section>
 
-      {account && containers.length > 0 && (
+      {value && containers.length > 0 && (
         <div className="price-status">
           <span>
-            {account.prices_fetched_at
-              ? `Ціни: ${formatDate(account.prices_fetched_at)} · з ціною ${account.priced_stacks} стеків, ` +
-                `без ціни ${account.unpriced_stacks} (поза ринком або прив’язані)`
+            {value.prices_fetched_at
+              ? `Ціни: ${formatDate(value.prices_fetched_at)} · з ціною ${value.priced_stacks} стеків, ` +
+                `без ціни ${value.unpriced_stacks} (поза ринком або прив’язані)`
               : "Ціни ще не завантажені."}
           </span>
-          <button
-            className="outline-button"
-            type="button"
-            onClick={() => void refreshPrices()}
-            disabled={busy}
-          >
-            ↻ Оновити ціни
-          </button>
+          <span className="account-actions">
+            {missingNames > 0 && (
+              <button
+                className="outline-button"
+                type="button"
+                onClick={() => void run("/api/items/refresh", "Шукаю назви на arsha.io…", () => "Назви оновлено.")}
+                disabled={busy}
+              >
+                ↻ Дотягнути назви ({missingNames})
+              </button>
+            )}
+            <button
+              className="outline-button"
+              type="button"
+              onClick={() =>
+                void run(
+                  "/api/prices/refresh",
+                  "Оновлюю ціни з ринку. Перший раз це може тривати до хвилини…",
+                  (result) => `Ціни оновлено для ${result.requested ?? 0} предметів.`,
+                )
+              }
+              disabled={busy}
+            >
+              ↻ Оновити ціни
+            </button>
+          </span>
         </div>
       )}
 
-      <div className="inventory-layout">
-        <section className="panel">
-          <div className="eyebrow">IMPORT</div>
-          <h2>Імпорт знімка</h2>
-          <p className="inventory-muted">
-            Вибери JSON з папки snapshots після запуску snapshot.py. Склади
-            приходять лише з першого входу після запуску гри, інвентар — з
-            будь-якого входу чи зміни персонажа.
-          </p>
+      {(loadError || error) && <p className="inventory-feedback error">{loadError || error}</p>}
+      {message && <p className="inventory-feedback">{message}</p>}
 
-          <div className="inventory-form">
-            <label htmlFor="snapshot-file">Файл знімка (.json)</label>
-            <input
-              id="snapshot-file"
-              type="file"
-              accept="application/json,.json"
-              onChange={(event) => void handleFile(event)}
-              disabled={busy}
-            />
-          </div>
-
-          {error && <p className="inventory-feedback error">{error}</p>}
-          {message && <p className="inventory-feedback">{message}</p>}
-
-          {holdings && holdings.missing_names > 0 && (
-            <button
-              className="outline-button snapshot-refresh"
-              type="button"
-              onClick={() => void refreshNames()}
-              disabled={busy}
-            >
-              ↻ Дотягнути назви ({holdings.missing_names})
-            </button>
-          )}
-
-          <div className="eyebrow snapshot-list-title">ЗНІМКИ</div>
-          {snapshots.length === 0 ? (
-            <p className="inventory-muted">Ще нічого не імпортовано.</p>
-          ) : (
-            <ul className="snapshot-list">
-              {snapshots.map((snapshot) => (
-                <li key={snapshot.id}>
-                  <strong>{formatDate(snapshot.taken_at)}</strong>
-                  <span>
-                    {snapshot.character} · {snapshot.stacks} записів
-                    {snapshot.storage_status === "compatible" && " · склади"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {account && account.top_items.length > 0 && (
-            <>
-              <div className="eyebrow snapshot-list-title">НАЙДОРОЖЧІ ПРЕДМЕТИ</div>
-              <ul className="snapshot-list">
-                {account.top_items.map((top, index) => (
-                  <li key={`${top.item_id}-${top.enhancement}-${index}`}>
-                    <strong>{itemLabel(top)} — {formatSilver(top.value)}</strong>
-                    <span>{top.container} · ×{top.quantity.toLocaleString("uk-UA")}</span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          {account && account.duplicates.length > 0 && (
-            <>
-              <div className="eyebrow snapshot-list-title">ДУБЛІКАТИ МІЖ СКЛАДАМИ</div>
-              <ul className="snapshot-list">
-                {account.duplicates.map((duplicate) => (
-                  <li key={`${duplicate.item_id}-${duplicate.enhancement}`}>
-                    <strong>
-                      {itemLabel(duplicate)} — ×{duplicate.quantity.toLocaleString("uk-UA")}
-                      {duplicate.value !== null && `, ${formatSilver(duplicate.value)}`}
-                    </strong>
-                    <span>
-                      {duplicate.places
-                        .map((place) => `${place.container} ×${place.quantity.toLocaleString("uk-UA")}`)
-                        .join(" · ")}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </section>
-
-        <section className="panel">
-          <div className="inventory-list-heading">
-            <div>
-              <div className="eyebrow">YOUR ACCOUNT</div>
-              <h2>Поточний стан</h2>
-            </div>
-          </div>
-
-          {loading ? (
-            <p className="inventory-muted">Завантаження...</p>
-          ) : containers.length === 0 ? (
-            <div className="inventory-empty">
-              <span>◇</span>
-              <strong>Даних ще немає</strong>
-              <p>Імпортуй перший знімок у панелі ліворуч.</p>
-            </div>
-          ) : (
-            (["inventory", "currency", "storage"] as const).map((kind) => {
+      {holdings.data === null && !loadError ? (
+        <p className="inventory-muted">Завантаження…</p>
+      ) : containers.length === 0 ? (
+        <EmptyState title="Даних ще немає">
+          Увімкни агента й зайди персонажем у світ — інвентар і склади знімуться самі.
+        </EmptyState>
+      ) : (
+        <div className="inventory-layout">
+          <section className="panel">
+            <div className="eyebrow">ПОТОЧНИЙ СТАН</div>
+            {(["inventory", "currency", "storage"] as const).map((kind) => {
               const group = containers.filter((container) => container.kind === kind);
               if (group.length === 0) return null;
 
               return (
                 <div className="holdings-kind" key={kind}>
-                  <div className="eyebrow">{kindLabels[kind].toUpperCase()}</div>
+                  <h2>{kindLabels[kind]}</h2>
                   {group.map((container) => (
                     <details className="holdings-group" key={container.id}>
                       <summary>
                         <strong>{container.name}</strong>
                         <span>
-                          {container.items.length} ·{" "}
-                          {containerValues.get(container.id)
-                            ? `${formatSilver(containerValues.get(container.id)!)} · `
-                            : ""}
-                          {formatDate(container.observed_at)}
+                          {container.items.length} поз.
+                          {containerValues.get(container.id) ? ` · ${formatSilver(containerValues.get(container.id)!)}` : ""}
+                          {` · ${formatDate(container.observed_at)}`}
                         </span>
                       </summary>
 
@@ -413,15 +223,22 @@ export default function InventoryPage() {
                               className="inventory-item"
                               key={`${holding.item_id}-${holding.enhancement}-${index}`}
                             >
-                              <div
-                                className={`inventory-item-icon ${holding.enhancement > 0 ? "enhanced" : ""}`}
-                              >
-                                <GameImage kind="item" id={holding.item_id} size={42} fallback={holding.enhancement > 0 ? null : "◇"} />
-                                {holding.enhancement > 0 && <span className="item-enhancement">+{holding.enhancement}</span>}
+                              <div className={`inventory-item-icon ${holding.enhancement > 0 ? "enhanced" : ""}`}>
+                                <GameImage
+                                  kind="item"
+                                  id={holding.item_id}
+                                  size={42}
+                                  fallback={holding.enhancement > 0 ? null : "◇"}
+                                />
+                                {holding.enhancement > 0 && (
+                                  <span className="item-enhancement">+{holding.enhancement}</span>
+                                )}
                               </div>
                               <div className="inventory-item-copy">
                                 <strong>{holding.name ?? `Предмет #${holding.item_id}`}</strong>
-                                <span>ID {holding.item_id}</span>
+                                <span>
+                                  {holding.unit_price ? `${formatSilver(holding.unit_price)} / шт.` : `ID ${holding.item_id}`}
+                                </span>
                               </div>
                               <div className="inventory-item-actions">
                                 <strong>×{holding.quantity.toLocaleString("uk-UA")}</strong>
@@ -437,14 +254,60 @@ export default function InventoryPage() {
                   ))}
                 </div>
               );
-            })
-          )}
-        </section>
-      </div>
+            })}
+          </section>
 
-      <footer className="inventory-footer">
-        BDO COMPANION / Локальний прототип · Неофіційний фан-проєкт
-      </footer>
-    </main>
+          <aside className="panel">
+            {value && value.top_items.length > 0 && (
+              <>
+                <div className="eyebrow">НАЙДОРОЖЧІ ПРЕДМЕТИ</div>
+                <ul className="snapshot-list">
+                  {value.top_items.map((top, index) => (
+                    <li key={`${top.item_id}-${top.enhancement}-${index}`}>
+                      <strong>{itemLabel(top)} — {formatSilver(top.value)}</strong>
+                      <span>{top.container} · ×{top.quantity.toLocaleString("uk-UA")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {value && value.duplicates.length > 0 && (
+              <>
+                <div className="eyebrow snapshot-list-title">ДУБЛІКАТИ МІЖ СКЛАДАМИ</div>
+                <ul className="snapshot-list">
+                  {value.duplicates.map((duplicate) => (
+                    <li key={`${duplicate.item_id}-${duplicate.enhancement}`}>
+                      <strong>
+                        {itemLabel(duplicate)} — ×{duplicate.quantity.toLocaleString("uk-UA")}
+                        {duplicate.value !== null && `, ${formatSilver(duplicate.value)}`}
+                      </strong>
+                      <span>
+                        {duplicate.places
+                          .map((place) => `${place.container} ×${place.quantity.toLocaleString("uk-UA")}`)
+                          .join(" · ")}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            <div className="eyebrow snapshot-list-title">ОСТАННІ ЗНІМКИ</div>
+            <ul className="snapshot-list">
+              {(snapshots.data ?? []).slice(0, 8).map((snapshot) => (
+                <li key={snapshot.id}>
+                  <strong>{formatDate(snapshot.taken_at)}</strong>
+                  <span>
+                    {snapshot.character} · {snapshot.stacks} записів
+                    {snapshot.storage_status === "compatible" && " · склади"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        </div>
+      )}
+    </AccountPage>
   );
 }

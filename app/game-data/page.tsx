@@ -53,9 +53,8 @@ export default function GameDataPage() {
 
   return (
     <AccountPage
-      active="/game-data/"
       title="Дані гри"
-      subtitle="Назви знань, квестів, робітників, міст, транспорту й предметів — з твого власного клієнта гри. Застосунок лише читає готовий вивід bdo-data-extractor; файли гри він не відкриває й нікуди не надсилає."
+      subtitle="Назви й картинки знань, квестів, робітників, міст, транспорту й предметів — з твого власного клієнта гри. Застосунок лише читає готовий вивід bdo-data-extractor: файли гри він не відкриває й нікуди не надсилає."
       onRecords={() => undefined}
     >
       <section className="panel account-group">

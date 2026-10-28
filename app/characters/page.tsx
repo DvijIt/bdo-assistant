@@ -1,6 +1,6 @@
 "use client";
 
-import { AccountPage, useApiData } from "../_components/AccountPage";
+import { AccountPage, EmptyState, useApiData } from "../_components/AccountPage";
 import { formatSeen } from "../_lib/api";
 
 type Character = {
@@ -31,8 +31,7 @@ export default function CharactersPage() {
 
   return (
     <AccountPage
-      active="/characters/"
-      title="Мої персонажі"
+      title="Персонажі"
       subtitle="Персонаж з'являється тут після входу ним у світ, поки агент увімкнено: клас, рівень і досвід приходять з трафіку гри. Слава — спільна для сім'ї."
       onRecords={() => {
         characters.reload();
@@ -61,11 +60,7 @@ export default function CharactersPage() {
       {characters.data === null && !error ? (
         <p className="inventory-muted">Завантаження...</p>
       ) : list.length === 0 ? (
-        <div className="inventory-empty panel">
-          <span>◇</span>
-          <strong>Персонажів ще немає</strong>
-          <p>Увімкни агента й зайди персонажем у світ.</p>
-        </div>
+        <EmptyState title="Персонажів ще немає">Увімкни агента й зайди персонажем у світ.</EmptyState>
       ) : (
         <section className="account-cards account-group">
           {list.map((character) => (

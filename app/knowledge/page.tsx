@@ -1,8 +1,9 @@
 "use client";
 
-import { ChangeEvent, useState } from "react";
+import Link from "next/link";
+import { useState } from "react";
 
-import { AccountPage, useApiData } from "../_components/AccountPage";
+import { AccountPage, EmptyState, useApiData } from "../_components/AccountPage";
 import { GameImage } from "../_components/GameImage";
 import { fetchJson, formatSeen } from "../_lib/api";
 
@@ -76,9 +77,6 @@ function Category({ row, version }: { row: CategoryRow; version: number }) {
 export default function KnowledgePage() {
   const summary = useApiData<Knowledge>("/api/knowledge");
   const roots = useApiData<CategoryView>("/api/knowledge/categories");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [importError, setImportError] = useState("");
   const [version, setVersion] = useState(0);
   const data = summary.data;
   const largest = Math.max(1, ...(data?.by_level ?? []).map((row) => row.count));
@@ -89,33 +87,10 @@ export default function KnowledgePage() {
     setVersion((v) => v + 1);
   }
 
-  async function importFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setBusy(true);
-    setImportError("");
-    setMessage("");
-    try {
-      const result = await fetchJson<{ categories: number; knowledge: number }>("/api/knowledge/import", {
-        method: "POST",
-        headers: { "Content-Type": "text/html" },
-        body: await file.text(),
-      });
-      setMessage(`Імпортовано ${result.knowledge.toLocaleString("uk-UA")} назв знань у ${result.categories} розділах.`);
-      reloadAll();
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Не вдалося імпортувати файл.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <AccountPage
-      active="/knowledge/"
       title="Знання"
-      subtitle="Книга знань сім'ї приходить при вході у світ (лише номери й рівні). Назви й розділи — з файлу сторінки знань bdocodex, який ти зберігаєш сам."
+      subtitle="Книга знань сім'ї приходить при вході у світ (лише номери й рівні). Назви, розділи й картинки — з твого клієнта гри."
       onRecords={reloadAll}
     >
       <section className="inventory-summary">
@@ -133,32 +108,21 @@ export default function KnowledgePage() {
         </div>
       </section>
 
-      {(summary.error || importError) && <p className="inventory-feedback error">{summary.error || importError}</p>}
-      {message && <p className="inventory-feedback">{message}</p>}
+      {summary.error && <p className="inventory-feedback error">{summary.error}</p>}
 
-      <section className="panel account-group">
-        <div className="inventory-list-heading">
-          <div>
-            <div className="eyebrow">НАЗВИ ЗНАНЬ</div>
-            <h2>{data?.names_loaded ? `${data.names_loaded.toLocaleString("uk-UA")} назв завантажено` : "Назви ще не завантажено"}</h2>
-          </div>
-        </div>
-        <p className="inventory-muted">
-          Відкрий у браузері bdocodex.com/us/knowledge/, збережи сторінку (Ctrl+S, «Веб-сторінка, лише HTML») і вибери
-          файл тут. Після патча з новими знаннями — повтори.
-        </p>
-        <div className="inventory-form">
-          <label htmlFor="knowledge-file">Файл сторінки знань (.html)</label>
-          <input id="knowledge-file" type="file" accept=".html,.htm,text/html" onChange={(e) => void importFile(e)} disabled={busy} />
-        </div>
-      </section>
+      {data && !data.names_loaded && (
+        <section className="panel account-group">
+          <div className="eyebrow">НАЗВИ ЗНАНЬ</div>
+          <h2>Назви ще не завантажено</h2>
+          <p className="inventory-muted">
+            Без них знання показуються лише кількістю. Імпортуй вивід bdo-data-extractor на сторінці{" "}
+            <Link className="text-link" href="/game-data/">«Дані гри»</Link> — з&apos;явиться дерево розділів із прогресом.
+          </p>
+        </section>
+      )}
 
       {data !== null && data.total === 0 ? (
-        <div className="inventory-empty panel">
-          <span>◇</span>
-          <strong>Знань ще немає</strong>
-          <p>Увімкни агента й зайди персонажем у світ.</p>
-        </div>
+        <EmptyState title="Знань ще немає">Увімкни агента й зайди персонажем у світ.</EmptyState>
       ) : (
         data && (
           <section className="panel account-group">
