@@ -11,6 +11,7 @@ const PAGES = [
   { href: "/transport/", label: "Транспорт" },
   { href: "/knowledge/", label: "Знання" },
   { href: "/inventory/", label: "Ресурси" },
+  { href: "/game-data/", label: "Дані гри" },
 ];
 
 const STATE_LABELS: Record<AgentStatus["state"], string> = {

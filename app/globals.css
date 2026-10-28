@@ -1476,3 +1476,37 @@ a.nav-item {
     width: 110px;
   }
 }
+
+.game-data-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0 18px;
+  padding-left: 20px;
+  color: #c5cad2;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.game-data-steps code {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  background: #0c0e12;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--gold-light);
+  font-size: 12px;
+  white-space: pre;
+}
+
+.game-data-steps code.inline {
+  display: inline;
+  margin: 0;
+  padding: 1px 5px;
+}
+
+.game-data-form {
+  max-width: 520px;
+}

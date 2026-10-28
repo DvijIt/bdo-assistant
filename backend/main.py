@@ -14,6 +14,7 @@ import account
 import agent as agent_module
 import arsha
 import snapshots
+import game_data
 import knowledge_names
 import valuation
 
@@ -60,6 +61,7 @@ def initialize_database():
         valuation.initialize_schema(connection)
         account.initialize_schema(connection)
         knowledge_names.initialize_schema(connection)
+        game_data.initialize_schema(connection)
 
 
 def opcode_profile() -> Path | None:
@@ -290,10 +292,21 @@ def stop_agent():
     return agent.stop()
 
 
+def _is_placeholder(name: str | None) -> bool:
+    """Назва-заглушка з довідників bdo_toolkit, як-от "class#13" чи "town#9999"."""
+    return not name or "#" in name
+
+
 @app.get("/api/characters")
 def get_characters():
     with get_connection() as connection:
-        return account.list_characters(connection)
+        characters = account.list_characters(connection)
+        names = game_data.lookup(connection, "character")
+    # Клас — це character key класу (Ranger = 2), тож назва береться з тієї ж таблиці персонажів.
+    for character in characters:
+        if _is_placeholder(character["class_name"]) and character["class_id"] is not None:
+            character["class_name"] = names.get(str(character["class_id"]), character["class_name"])
+    return characters
 
 
 @app.get("/api/family")
@@ -305,7 +318,39 @@ def get_family():
 @app.get("/api/workers")
 def get_workers():
     with get_connection() as connection:
-        return account.list_workers(connection)
+        workers = account.list_workers(connection)
+        characters = game_data.lookup(connection, "character")
+        nodes = game_data.lookup(connection, "node")
+        skills = game_data.lookup(connection, "worker_skill")
+    # Назви з власного клієнта (якщо імпортовано) мають перевагу над вбудованими довідниками.
+    for worker in workers:
+        worker["type_name"] = characters.get(str(worker["type_id"]), worker["type_name"])
+        worker["town_name"] = nodes.get(str(worker["town_id"]), worker["town_name"])
+        for skill in worker["skills"]:
+            skill["name"] = skills.get(str(skill["id"]), skill["name"])
+    return workers
+
+
+@app.get("/api/game-data")
+def get_game_data():
+    with get_connection() as connection:
+        return game_data.status(connection)
+
+
+class GameDataImport(BaseModel):
+    path: str = Field(min_length=1, max_length=1000)
+
+
+@app.post("/api/game-data/import")
+def import_game_data(request: GameDataImport):
+    """Читає вивід bdo-data-extractor з локальної папки (бекенд працює на тому ж ПК)."""
+    try:
+        with get_connection() as connection:
+            return game_data.import_directory(connection, request.path)
+    except game_data.GameDataError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise HTTPException(status_code=422, detail=f"Не вдалося прочитати вивід extractor: {error!r}")
 
 
 @app.get("/api/knowledge")
@@ -336,8 +381,13 @@ async def import_knowledge_names(request: Request):
 @app.get("/api/servants")
 def get_servants():
     with get_connection() as connection:
+        servants = account.list_servants(connection, valuation.unit_prices(connection))
+        characters = game_data.lookup(connection, "character")
+        for servant in servants:
+            # Тип транспорту — character key (31048 = Epheria Caravel), не предмет.
+            servant["kind_name"] = characters.get(str(servant["kind_id"]))
         return {
-            "servants": account.list_servants(connection, valuation.unit_prices(connection)),
+            "servants": servants,
             "missing_names": len(account.missing_gear_item_ids(connection)),
         }
 

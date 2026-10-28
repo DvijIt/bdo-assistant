@@ -154,6 +154,7 @@ export default function Home() {
         <Link href="/workers" className="nav-item">⚒ <span>Робітники</span></Link>
         <Link href="/transport" className="nav-item">⚓ <span>Транспорт</span></Link>
         <Link href="/knowledge" className="nav-item">✦ <span>Знання</span></Link>
+        <Link href="/game-data" className="nav-item">⚙ <span>Дані гри</span></Link>
 
         <div className="sidebar-bottom">
           <div className="connection-dot" />

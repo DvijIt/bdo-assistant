@@ -70,7 +70,11 @@ def parse_page(text: str) -> tuple[list[tuple], list[tuple]]:
 
 
 def import_page(connection: sqlite3.Connection, text: str) -> dict:
-    categories, entries = parse_page(text)
+    return replace(connection, *parse_page(text))
+
+
+def replace(connection: sqlite3.Connection, categories: list[tuple], entries: list[tuple]) -> dict:
+    """Замінює дерево знань: розділи (id, назва, батько, позиція) і знання (id, розділ, назва, позиція)."""
     connection.execute("DELETE FROM knowledge_categories")
     connection.execute("DELETE FROM knowledge_names")
     connection.executemany("INSERT INTO knowledge_categories VALUES (?, ?, ?, ?)", categories)

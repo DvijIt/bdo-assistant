@@ -18,6 +18,7 @@ type Gear = {
 
 type Servant = {
   kind_id: number;
+  kind_name: string | null;
   name: string;
   category: string;
   level_guess: number | null;
@@ -104,7 +105,7 @@ export default function TransportPage() {
                   <article className="account-servant" key={`${servant.kind_id}-${servant.name}`}>
                     <div className="account-servant-head">
                       <strong>{servant.name}</strong>
-                      <span>тип {servant.kind_id}</span>
+                      <span>{servant.kind_name ?? `тип ${servant.kind_id}`}</span>
                     </div>
                     {servant.gear.length === 0 ? (
                       <p className="inventory-muted">Без спорядження.</p>
