@@ -1304,7 +1304,7 @@ a.nav-item {
   flex: none;
   align-items: center;
   gap: 8px;
-  width: 170px;
+  width: 210px;
 }
 
 .knowledge-progress .progress-track {
@@ -1312,7 +1312,8 @@ a.nav-item {
 }
 
 .knowledge-progress small {
-  min-width: 58px;
+  min-width: 84px;
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
   font-size: 11px;
   text-align: right;
@@ -1392,7 +1393,15 @@ a.nav-item {
 
 @media (max-width: 480px) {
   .knowledge-progress {
-    width: 110px;
+    width: 150px;
+  }
+
+  .knowledge-progress small {
+    min-width: 66px;
+  }
+
+  .journal-bonus-total > span:last-child {
+    min-width: 88px;
   }
 }
 
@@ -1863,6 +1872,13 @@ a.nav-item {
 
 .journal-bonus-total .progress-track {
   width: 120px;
+}
+
+/* Підпис фіксованої ширини: смужка стоїть на тому самому місці в кожному рядку. */
+.journal-bonus-total > span:last-child {
+  min-width: 112px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .journal-missing a {
