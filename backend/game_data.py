@@ -62,15 +62,6 @@ SCHEMA = """
         npc_id INTEGER NOT NULL
     );
 
-    -- Карта регіонів (extractor `regionmaps`) і перерахунок світових координат у пікселі.
-    CREATE TABLE IF NOT EXISTS game_map (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        image TEXT NOT NULL,
-        width INTEGER NOT NULL,
-        height INTEGER NOT NULL,
-        transform TEXT NOT NULL         -- {"px": [a, b, c], "py": [a, b, c]}: px = a·x + b·z + c
-    );
-
     CREATE TABLE IF NOT EXISTS game_data_import (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         source TEXT NOT NULL,
@@ -298,18 +289,6 @@ def _knowledge_npcs(directory: Path, placed: set[int]) -> list[tuple[int, int]]:
     return links
 
 
-def _region_map(directory: Path) -> tuple | None:
-    """Карта регіонів з worldmap.json, якщо її картинку вже згенеровано (`regionmaps`)."""
-    path = directory / "worldmap.json"
-    if not path.is_file():
-        return None
-    data = _read_json(path)
-    image = data.get("image")
-    if not isinstance(image, str) or not (directory / image).is_file():
-        return None
-    return image, int(data["width"]), int(data["height"]), json.dumps(data["transform"])
-
-
 def _items(directory: Path) -> list[tuple]:
     path = directory / "items.json"
     if not path.is_file():
@@ -379,10 +358,6 @@ def import_directory(connection: sqlite3.Connection, directory: str | Path) -> d
         connection.execute("DELETE FROM knowledge_npc")
         connection.executemany("INSERT OR IGNORE INTO knowledge_npc VALUES (?, ?)", links)
         counts.update(npcs=len(npcs), knowledge_npcs=len(links))
-    region_map = _region_map(directory)
-    connection.execute("DELETE FROM game_map")
-    if region_map:
-        connection.execute("INSERT INTO game_map VALUES (1, ?, ?, ?, ?)", region_map)
     names +=[("node", str(k), v) for k, v in nodes.items()]
     counts["nodes"] = len(nodes)
     items = _items(directory)
@@ -502,31 +477,47 @@ def node_details(connection: sqlite3.Connection, node_ids: list[int]) -> dict[in
     return out
 
 
-def _to_image(transform: dict, x: float, z: float) -> tuple[float, float]:
-    a, b, c = transform["px"]
-    d, e, f = transform["py"]
-    return a * x + b * z + c, d * x + e * z + f
+# Плитки карти, як у грі: extractor `worldmap-files` пише <шар>/<z>/<x>/<y>.webp і meta.json на шар.
+TILES_DIR = "worldmap-files"
+MAP_LAYERS = ("world", "morningland")
+
+
+def map_layers(connection: sqlite3.Connection) -> list[dict]:
+    """meta.json кожного шару карти, що є в папці імпорту (порожньо, доки плиток немає)."""
+    source = _source(connection)
+    layers = []
+    for name in MAP_LAYERS:
+        meta = source / TILES_DIR / name / "meta.json" if source else None
+        if meta and meta.is_file():
+            layers.append({"name": name, **_read_json(meta)})
+    return layers
+
+
+def _layer_of(layers: list[dict], x: float, z: float) -> str | None:
+    """Шар, сітка плиток якого містить точку; Ранкова Країна — окремий шар зі своєю сіткою."""
+    for layer in layers:
+        size = layer["unitsPerTile"]
+        grid = layer["grid"]
+        if grid["xmin"] <= x // size <= grid["xmax"] and grid["ymin"] <= z // size <= grid["ymax"]:
+            return layer["name"]
+    return None
 
 
 def map_data(connection: sqlite3.Connection, invested: set[int], gained: set[int]) -> dict | None:
     """Карта: усі вузли (вкладені позначено) і NPC, у яких можна взяти ще не зібрані знання.
-    Координати — у пікселях картинки карти. None, доки карту не згенеровано й не імпортовано."""
-    row = connection.execute("SELECT * FROM game_map WHERE id = 1").fetchone()
-    if row is None:
+    Координати світові (x, z у см гри); None, доки плиток карти немає."""
+    layers = map_layers(connection)
+    if not layers:
         return None
-    transform = json.loads(row["transform"])
-
-    def inside(px: float, py: float) -> bool:
-        return 0 <= px <= row["width"] and 0 <= py <= row["height"]
 
     nodes = []
     for node in connection.execute("SELECT node_id, name, territory, manager_id, x, z FROM game_nodes "
                                    "WHERE x IS NOT NULL"):
-        px, py = _to_image(transform, node["x"], node["z"])
-        if inside(px, py):
+        layer = _layer_of(layers, node["x"], node["z"])
+        if layer:
             nodes.append({"node_id": node["node_id"], "name": node["name"], "territory": node["territory"],
                           "sub": node["manager_id"] is not None, "invested": node["node_id"] in invested,
-                          "x": round(px, 1), "y": round(py, 1)})
+                          "layer": layer, "x": node["x"], "z": node["z"]})
 
     npcs: dict[int, dict] = {}
     for link in connection.execute(
@@ -541,32 +532,28 @@ def map_data(connection: sqlite3.Connection, invested: set[int], gained: set[int
     ):
         if link["knowledge_id"] in gained:
             continue
-        px, py = _to_image(transform, link["x"], link["z"])
-        if not inside(px, py):
+        layer = _layer_of(layers, link["x"], link["z"])
+        if not layer:
             continue
         npc = npcs.setdefault(link["npc_id"], {
             "npc_id": link["npc_id"], "name": link["name"], "title": link["title"], "region": link["region"],
-            "x": round(px, 1), "y": round(py, 1), "knowledge": [],
+            "layer": layer, "x": link["x"], "z": link["z"], "knowledge": [],
         })
         npc["knowledge"].append({"knowledge_id": link["knowledge_id"], "name": link["knowledge"],
                                  "category": link["category"], "acquisition": link["acquisition"]})
     return {
-        "image": {"width": row["width"], "height": row["height"]},
+        "layers": layers,
         "nodes": nodes,
         "npcs": sorted(npcs.values(), key=lambda n: (-len(n["knowledge"]), n["name"])),
     }
 
 
-def map_image(connection: sqlite3.Connection) -> Path | None:
+def map_tile(connection: sqlite3.Connection, layer: str, z: int, x: int, y: int) -> Path | None:
     source = _source(connection)
-    row = connection.execute("SELECT image FROM game_map WHERE id = 1").fetchone()
-    if source is None or row is None:
+    if source is None or layer not in MAP_LAYERS:
         return None
-    base = source.resolve()
-    path = (base / row["image"]).resolve()
-    if not path.is_relative_to(base) or not path.is_file():
-        return None
-    return path
+    path = source / TILES_DIR / layer / str(z) / str(x) / f"{y}.webp"
+    return path if path.is_file() else None
 
 
 def lookup(connection: sqlite3.Connection, kind: str) -> dict[str, str]:

@@ -98,10 +98,10 @@ export default function GameDataPage() {
             Шлях після <code className="inline">--game</code> — твоя папка гри.
           </li>
           <li>
-            За бажанням — картинки предметів і знань та карта регіонів для сторінки «Карта» (сотні МБ; після <code className="inline">build</code>):
+            За бажанням — картинки предметів і знань та карта світу для сторінки «Карта» (сотні МБ; після <code className="inline">build</code>):
             <code>go run . icons --game D:\BlackDesert --out D:\Projects\bdo-data</code>
             <code>go run . knowledge-icons --game D:\BlackDesert --out D:\Projects\bdo-data</code>
-            <code>go run . regionmaps --game D:\BlackDesert --out D:\Projects\bdo-data</code>
+            <code>go run . worldmap-files --game D:\BlackDesert --out D:\Projects\bdo-data</code>
           </li>
           <li>Вкажи папку з результатом нижче й натисни «Імпортувати». Картинки не копіюються — їх показуємо прямо з цієї папки.</li>
         </ol>

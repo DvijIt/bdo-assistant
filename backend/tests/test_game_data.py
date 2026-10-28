@@ -208,27 +208,31 @@ def test_map_places_nodes_and_npcs_for_unlearned_knowledge(client, tmp_path):
     ])
     write(tmp_path / "world.json", {"territories": [], "nodes": [
         {"key": 301, "name": "Testheim", "enabled": True, "position": [3000.0, 0.0, 4000.0]},
+        {"key": 302, "name": "Far Away", "enabled": True, "position": [9_000_000.0, 0.0, 0.0]},
     ]})
-    (tmp_path / "regionmaps").mkdir()
-    (tmp_path / "regionmaps" / "map.png").write_bytes(b"PNG")
-    write(tmp_path / "worldmap.json", {"image": "regionmaps/map.png", "width": 100, "height": 100,
-                                       "transform": {"px": [0.01, 0, 10], "py": [0, -0.01, 90]}})
+    meta = {"tilePx": 128, "unitsPerPixel": 100, "unitsPerTile": 12800, "minZoom": 0, "maxZoom": 1,
+            "tileWorldSizeZ0": 25600, "grid": {"xmin": -1, "xmax": 0, "ymin": -1, "ymax": 0}}
+    write(tmp_path / "worldmap-files" / "world" / "meta.json", meta)
+    tile = tmp_path / "worldmap-files" / "world" / "1" / "-1" / "0.webp"
+    tile.parent.mkdir(parents=True)
+    tile.write_bytes(b"RIFF-tile")
     save([KnowledgeBatch(1.0, 0, (KnowledgeEntry(11, 1),)), NodeBatch(1.0, (NodeState(301, True),))])
     counts = client.post("/api/game-data/import", json={"path": str(tmp_path)}).json()
     assert (counts["npcs"], counts["knowledge_npcs"]) == (1, 2)
 
     data = client.get("/api/map").json()
-    assert data["image"] == {"width": 100, "height": 100}
+    assert [layer["name"] for layer in data["layers"]] == ["world"]
+    # «Far Away» поза сіткою плиток — на карту не потрапляє.
     assert data["nodes"] == [{"node_id": 301, "name": "Testheim", "territory": None, "sub": False,
-                              "invested": True, "x": 40.0, "y": 50.0}]
+                              "invested": True, "layer": "world", "x": 3000.0, "z": 4000.0}]
     (npc,) = data["npcs"]
-    assert (npc["name"], npc["title"], npc["region"], npc["x"], npc["y"]) == ("Mira", "Test Merchant", "Testheim",
-                                                                             20.0, 70.0)
+    assert (npc["name"], npc["title"], npc["region"], npc["layer"]) == ("Mira", "Test Merchant", "Testheim", "world")
     assert [k["name"] for k in npc["knowledge"]] == ["Mira"]  # «Known» уже зібрано
-    assert client.get("/api/game-data/map-image").content == b"PNG"
+    assert client.get("/api/game-data/map-tiles/world/1/-1/0").content == b"RIFF-tile"
+    assert client.get("/api/game-data/map-tiles/world/1/5/5").status_code == 404
+    assert client.get("/api/game-data/map-tiles/secret/1/-1/0").status_code == 404
 
 
-def test_map_is_null_until_the_region_map_is_generated(client, extractor_output):
+def test_map_is_null_until_the_tiles_are_generated(client, extractor_output):
     client.post("/api/game-data/import", json={"path": str(extractor_output)})
     assert client.get("/api/map").json() is None
-    assert client.get("/api/game-data/map-image").status_code == 404

@@ -342,20 +342,20 @@ def get_nodes():
 
 @app.get("/api/map")
 def get_map():
-    """Карта регіонів з вузлами й NPC для ще не зібраних знань; null, доки карти немає."""
+    """Шари карти, вузли й NPC для ще не зібраних знань; null, доки плиток карти немає."""
     with get_connection() as connection:
         invested = set(account.invested_node_ids(connection))
         gained = {row[0] for row in connection.execute("SELECT knowledge_id FROM knowledge")}
         return game_data.map_data(connection, invested, gained)
 
 
-@app.get("/api/game-data/map-image")
-def get_map_image():
+@app.get("/api/game-data/map-tiles/{layer}/{z}/{x}/{y}")
+def get_map_tile(layer: str, z: int, x: int, y: int):
     with get_connection() as connection:
-        path = game_data.map_image(connection)
+        path = game_data.map_tile(connection, layer, z, x, y)
     if path is None:
-        raise HTTPException(status_code=404, detail="Карту ще не згенеровано")
-    return FileResponse(path, headers=IMAGE_HEADERS)
+        raise HTTPException(status_code=404, detail="Плитки немає")
+    return FileResponse(path, media_type="image/webp", headers=IMAGE_HEADERS)
 
 
 @app.get("/api/workers")
