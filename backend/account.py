@@ -88,7 +88,8 @@ SCHEMA = """
 """
 
 # Ймовірна відповідність рівнів буквам у грі; не перевірена на конкретних знаннях.
-KNOWLEDGE_GRADES = {1: "C", 2: "B", 3: "A", 4: "S", 5: "SS"}
+# Звірено з грою: C=1, B=2, A=3, S=5; букву для 4 ще не підтверджено.
+KNOWLEDGE_GRADES = {1: "C", 2: "B", 3: "A", 4: "4", 5: "S"}
 
 # Незнищенні предмети (наприклад, спорядження табору) мають максимальну міцність 32767.
 INDESTRUCTIBLE = 32767
@@ -238,17 +239,27 @@ class AccountWriter:
         )
 
 
-def knowledge_summary(connection: sqlite3.Connection) -> dict:
+def knowledge_summary(connection: sqlite3.Connection, graded_ids: set[int] | None = None) -> dict:
+    """`graded_ids` — знання з розділів, що мають рівні (з імпортованих назв); тоді решта
+    рахується як «без рівня», а не як найнижчий рівень."""
     summary = connection.execute("SELECT ecology_points, updated_at FROM knowledge_summary WHERE id = 1").fetchone()
-    counts = dict(connection.execute("SELECT level, COUNT(*) FROM knowledge GROUP BY level").fetchall())
+    levels = dict(connection.execute("SELECT knowledge_id, level FROM knowledge").fetchall())
+    counts: dict[int, int] = {}
+    ungraded = 0
+    for knowledge_id, level in levels.items():
+        if graded_ids is not None and knowledge_id not in graded_ids:
+            ungraded += 1
+        else:
+            counts[level] = counts.get(level, 0) + 1
     return {
-        "total": sum(counts.values()),
+        "total": len(levels),
         "ecology_points": None if summary is None else summary["ecology_points"],
         "updated_at": None if summary is None else summary["updated_at"],
         "by_level": [
-            {"level": level, "grade": KNOWLEDGE_GRADES.get(level), "count": counts.get(level, 0)}
+            {"level": level, "grade": KNOWLEDGE_GRADES.get(level, str(level)), "count": counts.get(level, 0)}
             for level in sorted(set(KNOWLEDGE_GRADES) | set(counts))
         ],
+        "ungraded": None if graded_ids is None else ungraded,
     }
 
 

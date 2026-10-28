@@ -1417,3 +1417,62 @@ a.nav-item {
 .main-content > .agent-bar {
   margin-top: 0;
 }
+
+.knowledge-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.knowledge-category > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.knowledge-children {
+  padding: 4px 0 10px 16px;
+}
+
+.knowledge-progress {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 170px;
+}
+
+.knowledge-progress .progress-track {
+  flex: 1;
+}
+
+.knowledge-progress small {
+  min-width: 58px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.knowledge-entries {
+  margin-top: 10px;
+}
+
+.knowledge-entries li b {
+  color: var(--gold-light);
+}
+
+.knowledge-entries li.missing {
+  opacity: 0.45;
+}
+
+@media (max-width: 480px) {
+  .knowledge-progress {
+    width: 110px;
+  }
+}

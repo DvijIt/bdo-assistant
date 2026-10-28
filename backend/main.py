@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import sqlite3
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -14,6 +14,7 @@ import account
 import agent as agent_module
 import arsha
 import snapshots
+import knowledge_names
 import valuation
 
 
@@ -58,6 +59,7 @@ def initialize_database():
         snapshots.initialize_schema(connection)
         valuation.initialize_schema(connection)
         account.initialize_schema(connection)
+        knowledge_names.initialize_schema(connection)
 
 
 def opcode_profile() -> Path | None:
@@ -309,7 +311,26 @@ def get_workers():
 @app.get("/api/knowledge")
 def get_knowledge():
     with get_connection() as connection:
-        return account.knowledge_summary(connection)
+        summary = account.knowledge_summary(connection, knowledge_names.graded_ids(connection))
+        summary["names_loaded"] = knowledge_names.names_loaded(connection)
+        return summary
+
+
+@app.get("/api/knowledge/categories")
+def get_knowledge_categories(parent: int = 0):
+    with get_connection() as connection:
+        return knowledge_names.category_view(connection, parent)
+
+
+@app.post("/api/knowledge/import")
+async def import_knowledge_names(request: Request):
+    """Тіло — збережена сторінка bdocodex.com/us/knowledge/ (HTML)."""
+    text = (await request.body()).decode("utf-8", errors="replace")
+    try:
+        with get_connection() as connection:
+            return knowledge_names.import_page(connection, text)
+    except knowledge_names.KnowledgeImportError as error:
+        raise HTTPException(status_code=422, detail=str(error))
 
 
 @app.get("/api/servants")

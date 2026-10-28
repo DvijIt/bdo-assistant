@@ -141,7 +141,9 @@ def test_knowledge_from_several_batches(client):
     knowledge = client.get("/api/knowledge").json()
 
     assert (knowledge["total"], knowledge["ecology_points"], knowledge["updated_at"]) == (4, 2596, 400.0)
-    assert {row["grade"]: row["count"] for row in knowledge["by_level"]} == {"C": 2, "B": 0, "A": 1, "S": 0, "SS": 1}
+    # Звірено з грою: S — це 5; букву для 4 ще не підтверджено.
+    assert {row["grade"]: row["count"] for row in knowledge["by_level"]} == {"C": 2, "B": 0, "A": 1, "4": 0, "S": 1}
+    assert knowledge["ungraded"] is None  # назви не імпортовано
 
 
 class FakeSession:
