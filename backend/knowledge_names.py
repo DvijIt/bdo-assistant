@@ -21,7 +21,8 @@ SCHEMA = """
         knowledge_id INTEGER PRIMARY KEY,
         category_id INTEGER NOT NULL,
         name TEXT NOT NULL,
-        position INTEGER NOT NULL
+        position INTEGER NOT NULL,
+        acquisition TEXT                   -- «де взяти», як у вікні знань гри (з клієнта; bdocodex його не дає)
     );
 """
 
@@ -37,6 +38,9 @@ class KnowledgeImportError(ValueError):
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(SCHEMA)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(knowledge_names)")}
+    if "acquisition" not in columns:
+        connection.execute("ALTER TABLE knowledge_names ADD COLUMN acquisition TEXT")
 
 
 def parse_page(text: str) -> tuple[list[tuple], list[tuple]]:
@@ -74,11 +78,14 @@ def import_page(connection: sqlite3.Connection, text: str) -> dict:
 
 
 def replace(connection: sqlite3.Connection, categories: list[tuple], entries: list[tuple]) -> dict:
-    """Замінює дерево знань: розділи (id, назва, батько, позиція) і знання (id, розділ, назва, позиція)."""
+    """Замінює дерево знань: розділи (id, назва, батько, позиція) і знання (id, розділ, назва, позиція[, де взяти])."""
     connection.execute("DELETE FROM knowledge_categories")
     connection.execute("DELETE FROM knowledge_names")
     connection.executemany("INSERT INTO knowledge_categories VALUES (?, ?, ?, ?)", categories)
-    connection.executemany("INSERT INTO knowledge_names VALUES (?, ?, ?, ?)", entries)
+    connection.executemany(
+        "INSERT INTO knowledge_names (knowledge_id, category_id, name, position, acquisition) VALUES (?, ?, ?, ?, ?)",
+        [(*entry[:4], entry[4] if len(entry) > 4 else None) for entry in entries],
+    )
     return {"categories": len(categories), "knowledge": len(entries)}
 
 
@@ -112,7 +119,7 @@ def category_view(connection: sqlite3.Connection, parent_id: int) -> dict:
     categories, children = _tree(connection)
     if parent_id and parent_id not in categories:
         return {"categories": [], "entries": []}
-    names = list(connection.execute("SELECT knowledge_id, category_id, name, position FROM knowledge_names"))
+    names = list(connection.execute("SELECT knowledge_id, category_id, name, position, acquisition FROM knowledge_names"))
     by_category: dict[int, list] = {}
     for row in names:
         by_category.setdefault(row["category_id"], []).append(row)
@@ -147,6 +154,7 @@ def category_view(connection: sqlite3.Connection, parent_id: int) -> dict:
             "gained": row["knowledge_id"] in levels,
             "level": levels.get(row["knowledge_id"]),
             "grade": grade(levels.get(row["knowledge_id"]), graded),
+            "acquisition": row["acquisition"],
         }
         for row in sorted(by_category.get(parent_id, []), key=lambda r: r["position"])
     ]

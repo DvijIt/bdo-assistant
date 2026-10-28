@@ -142,7 +142,7 @@ def _knowledge(directory: Path) -> tuple[list[tuple], list[tuple]] | None:
         return None
     data = _read_json(path)
 
-    visible: list[tuple[int, int, str]] = []
+    visible: list[tuple[int, int, str, str | None]] = []
     hidden: dict[int, int] = {}
     for entry in data.get("entries") or []:
         reference = _urn_id(entry.get("theme"))
@@ -153,20 +153,20 @@ def _knowledge(directory: Path) -> tuple[list[tuple], list[tuple]] | None:
         if (reference >> 16) & HIDDEN_ENTRY_FLAG:
             hidden[theme] = hidden.get(theme, 0) + 1
         else:
-            visible.append((int(entry["key"]), theme, name))
-    shown = {theme: 0 for _, theme, _ in visible}
-    for _, theme, _ in visible:
+            visible.append((int(entry["key"]), theme, name, _acquisition(entry.get("acquisition"))))
+    shown = {theme: 0 for _, theme, _, _ in visible}
+    for _, theme, _, _ in visible:
         shown[theme] += 1
 
     positions: dict[int, int] = {}
     entries = []
     # Порядок знань у розділі — як у файлі: так їх показує гра.
-    for key, theme, name in visible:
+    for key, theme, name, acquisition in visible:
         if hidden.get(theme, 0) > shown[theme]:
             continue
         position = positions.get(theme, 0)
         positions[theme] = position + 1
-        entries.append((key, theme, name, position))
+        entries.append((key, theme, name, position, acquisition))
 
     themes = {int(t["key"]): t for t in data.get("themes") or []}
     parents = {key: _urn_id(theme.get("parent")) or 0 for key, theme in themes.items()}
@@ -186,6 +186,14 @@ def _knowledge(directory: Path) -> tuple[list[tuple], list[tuple]] | None:
         siblings[parent] = position + 1
         categories.append((key, _clean(themes[key].get("name") or str(key)), parent, position))
     return categories, entries
+
+
+def _acquisition(text) -> str | None:
+    """«Де взяти» з вікна знань гри; «????» гра показує, поки знання приховане, — це не підказка."""
+    if not isinstance(text, str):
+        return None
+    cleaned = "\n".join(line.strip() for line in _clean(text).splitlines() if line.strip())
+    return cleaned if cleaned and set(cleaned) != {"?"} else None
 
 
 def _nodes(directory: Path) -> dict[int, str]:

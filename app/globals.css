@@ -1371,9 +1371,21 @@ a.nav-item {
   border-radius: 5px;
 }
 
-.knowledge-entries li.missing .knowledge-entry-image,
-.knowledge-entries li.missing .knowledge-entry-name {
+.knowledge-entry-hint {
+  display: block;
+  margin-top: 3px;
+  color: var(--gold);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.knowledge-entries li.missing .knowledge-entry-image {
   opacity: 0.45;
+}
+
+.knowledge-entries li.missing .knowledge-entry-name {
+  color: var(--muted);
 }
 
 @media (max-width: 480px) {

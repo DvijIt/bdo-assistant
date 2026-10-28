@@ -17,7 +17,14 @@ type Knowledge = {
 };
 
 type CategoryRow = { category_id: number; name: string; total: number; gained: number; has_children: boolean };
-type Entry = { knowledge_id: number; name: string; gained: boolean; level: number | null; grade: string | null };
+type Entry = {
+  knowledge_id: number;
+  name: string;
+  gained: boolean;
+  level: number | null;
+  grade: string | null;
+  acquisition: string | null;
+};
 type CategoryView = { categories: CategoryRow[]; entries: Entry[] };
 
 function Progress({ gained, total }: { gained: number; total: number }) {
@@ -69,7 +76,12 @@ function Category({ row, version }: { row: CategoryRow; version: number }) {
                     className="knowledge-entry-image"
                     fallback={<span className="knowledge-entry-image" aria-hidden="true" />}
                   />
-                  <span className="knowledge-entry-name">{entry.name}</span>
+                  <span className="knowledge-entry-name">
+                    {entry.name}
+                    {!entry.gained && entry.acquisition && entry.acquisition !== entry.name && (
+                      <small className="knowledge-entry-hint">{entry.acquisition}</small>
+                    )}
+                  </span>
                   <span className="knowledge-entry-state">
                     {!entry.gained ? "не зібрано" : entry.grade && entry.grade !== "—" ? <b>{entry.grade}</b> : "✓"}
                   </span>

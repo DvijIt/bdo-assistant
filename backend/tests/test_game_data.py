@@ -143,7 +143,8 @@ def test_knowledge_tree_follows_the_game_book(client, tmp_path):
             {"key": 10399, "name": "None"},
         ],
         "entries": [
-            {"key": 2, "theme": "urn::knowledge:theme:10010", "name": "Wolf"},
+            {"key": 2, "theme": "urn::knowledge:theme:10010", "name": "Wolf",
+             "acquisition": "<PAColor0xfff3d900>Can be obtained through [Exploration]<PAOldColor>\nBalenos Forest"},
             # Старші біти — прапорці: 1 — звичайне знання, 0x100 — у книзі гри його немає.
             {"key": 1, "theme": f"urn::knowledge:theme:{1 << 16 | 10010}", "name": "Boar"},
             {"key": 3, "theme": f"urn::knowledge:theme:{0x100 << 16 | 10020}", "name": "Hidden"},
@@ -162,3 +163,5 @@ def test_knowledge_tree_follows_the_game_book(client, tmp_path):
     assert [r["name"] for r in ecology] == ["Balenos", "Serendia"]  # за номером, не за порядком у файлі
     balenos = client.get("/api/knowledge/categories?parent=10010").json()["entries"]
     assert [e["name"] for e in balenos] == ["Wolf", "Boar"]  # порядок знань — як у файлі
+    assert balenos[0]["acquisition"] == "Can be obtained through [Exploration]\nBalenos Forest"
+    assert balenos[1]["acquisition"] is None
