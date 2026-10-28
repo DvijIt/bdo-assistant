@@ -59,11 +59,20 @@ function Category({ row, version }: { row: CategoryRow; version: number }) {
             <Category key={`${child.category_id}-${version}`} row={child} version={version} />
           ))}
           {view.entries.length > 0 && (
-            <ul className="chip-list knowledge-entries">
+            <ul className="knowledge-entries">
               {view.entries.map((entry) => (
                 <li key={entry.knowledge_id} className={entry.gained ? undefined : "missing"} title={`ID ${entry.knowledge_id}`}>
-                  <GameImage kind="knowledge" id={entry.knowledge_id} size={28} className="knowledge-entry-image" />
-                  {entry.grade && entry.grade !== "—" && <b>{entry.grade}</b>} {entry.name}
+                  <GameImage
+                    kind="knowledge"
+                    id={entry.knowledge_id}
+                    size={28}
+                    className="knowledge-entry-image"
+                    fallback={<span className="knowledge-entry-image" aria-hidden="true" />}
+                  />
+                  <span className="knowledge-entry-name">{entry.name}</span>
+                  <span className="knowledge-entry-state">
+                    {!entry.gained ? "не зібрано" : entry.grade && entry.grade !== "—" ? <b>{entry.grade}</b> : "✓"}
+                  </span>
                 </li>
               ))}
             </ul>

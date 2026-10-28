@@ -131,3 +131,34 @@ def test_images_are_served_from_the_import_folder(client, extractor_output, tmp_
     assert client.get("/api/game-data/icons/item/1").status_code == 404
     # Шлях з asset_redirects.json не виходить за межі папки імпорту.
     assert client.get("/api/game-data/icons/knowledge/4006").status_code == 404
+
+
+def test_knowledge_tree_follows_the_game_book(client, tmp_path):
+    write(tmp_path / "knowledge.json", {
+        "themes": [
+            {"key": 10020, "name": "Serendia", "parent": "urn::knowledge:theme:10001"},
+            {"key": 10001, "name": "Ecology"},
+            {"key": 10010, "name": "Balenos", "parent": "urn::knowledge:theme:10001"},
+            {"key": 10320, "name": "Empty Bosses"},
+            {"key": 10399, "name": "None"},
+        ],
+        "entries": [
+            {"key": 2, "theme": "urn::knowledge:theme:10010", "name": "Wolf"},
+            # Старші біти — прапорці: 1 — звичайне знання, 0x100 — у книзі гри його немає.
+            {"key": 1, "theme": f"urn::knowledge:theme:{1 << 16 | 10010}", "name": "Boar"},
+            {"key": 3, "theme": f"urn::knowledge:theme:{0x100 << 16 | 10020}", "name": "Hidden"},
+            {"key": 4, "theme": "urn::knowledge:theme:10020", "name": "Fox"},
+            {"key": 5, "theme": f"urn::knowledge:theme:{0x100 << 16 | 10399}", "name": "Test A"},
+            {"key": 6, "theme": f"urn::knowledge:theme:{0x100 << 16 | 10399}", "name": "Test B"},
+            {"key": 7, "theme": "urn::knowledge:theme:10399", "name": "Leftover"},
+        ],
+    })
+    counts = client.post("/api/game-data/import", json={"path": str(tmp_path)}).json()
+
+    assert (counts["categories"], counts["knowledge"]) == (3, 3)
+    roots = client.get("/api/knowledge/categories").json()["categories"]
+    assert [r["name"] for r in roots] == ["Ecology"]  # порожні й службові розділи сховано
+    ecology = client.get("/api/knowledge/categories?parent=10001").json()["categories"]
+    assert [r["name"] for r in ecology] == ["Balenos", "Serendia"]  # за номером, не за порядком у файлі
+    balenos = client.get("/api/knowledge/categories?parent=10010").json()["entries"]
+    assert [e["name"] for e in balenos] == ["Wolf", "Boar"]  # порядок знань — як у файлі

@@ -29,7 +29,6 @@ SCHEMA = """
 GRADES = {1: "C", 2: "B", 3: "A", 5: "S"}
 # Лише в цих кореневих розділах знання мають рівень; в інших 1 означає «без рівня».
 GRADED_ROOTS = {"Ecology", "Trade"}
-HIDDEN_CATEGORY = "None"
 
 
 class KnowledgeImportError(ValueError):
@@ -132,9 +131,6 @@ def category_view(connection: sqlite3.Connection, parent_id: int) -> dict:
 
     rows = []
     for category_id in children.get(parent_id, []):
-        # У клієнті є службовий розділ «None» з кількома незавершеними знаннями — у грі його не видно.
-        if categories[category_id]["name"] == HIDDEN_CATEGORY:
-            continue
         total, gained = count(category_id)
         rows.append({
             "category_id": category_id,

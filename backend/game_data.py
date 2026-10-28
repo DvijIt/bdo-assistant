@@ -128,28 +128,63 @@ def _names(table: dict) -> dict[int, str]:
     return out
 
 
+# Посилання знання на розділ: молодші 16 біт — номер розділу, старші — прапорці. Знань із прапорцем
+# 0x100 у книзі знань гри немає (звірено з bdocodex: 373 таких, жодне не показується); прапорець 1 — звичайні.
+# Розділ, де прихованих знань більше, ніж видимих, — службовий («None», «People of the Black Desert»): у грі
+# його немає, як і кількох видимих знань у ньому.
+THEME_MASK = 0xFFFF
+HIDDEN_ENTRY_FLAG = 0x100
+
+
 def _knowledge(directory: Path) -> tuple[list[tuple], list[tuple]] | None:
     path = directory / "knowledge.json"
     if not path.is_file():
         return None
     data = _read_json(path)
-    siblings: dict[int, int] = {}
-    categories = []
-    for theme in data.get("themes") or []:
-        parent = _urn_id(theme.get("parent")) or 0
-        position = siblings.get(parent, 0)
-        siblings[parent] = position + 1
-        categories.append((int(theme["key"]), _clean(theme.get("name") or str(theme["key"])), parent, position))
+
+    visible: list[tuple[int, int, str]] = []
+    hidden: dict[int, int] = {}
+    for entry in data.get("entries") or []:
+        reference = _urn_id(entry.get("theme"))
+        name = _clean(entry.get("name") or "")
+        if reference is None or not name:
+            continue
+        theme = reference & THEME_MASK
+        if (reference >> 16) & HIDDEN_ENTRY_FLAG:
+            hidden[theme] = hidden.get(theme, 0) + 1
+        else:
+            visible.append((int(entry["key"]), theme, name))
+    shown = {theme: 0 for _, theme, _ in visible}
+    for _, theme, _ in visible:
+        shown[theme] += 1
+
     positions: dict[int, int] = {}
     entries = []
-    for entry in data.get("entries") or []:
-        theme = _urn_id(entry.get("theme"))
-        name = _clean(entry.get("name") or "")
-        if theme is None or not name:
+    # Порядок знань у розділі — як у файлі: так їх показує гра.
+    for key, theme, name in visible:
+        if hidden.get(theme, 0) > shown[theme]:
             continue
         position = positions.get(theme, 0)
         positions[theme] = position + 1
-        entries.append((int(entry["key"]), theme, name, position))
+        entries.append((key, theme, name, position))
+
+    themes = {int(t["key"]): t for t in data.get("themes") or []}
+    parents = {key: _urn_id(theme.get("parent")) or 0 for key, theme in themes.items()}
+    # Розділ лишаємо, лише якщо в ньому чи в підрозділах є знання: порожні (≈100) у грі не показуються.
+    filled: set[int] = set()
+    for theme in positions:
+        while theme and theme not in filled and theme in themes:
+            filled.add(theme)
+            theme = parents[theme]
+
+    # Розділи одного рівня гра впорядковує за номером (Ecology: Eastern Balenos 10010, Serendia 10020, …).
+    siblings: dict[int, int] = {}
+    categories = []
+    for key in sorted(filled):
+        parent = parents[key]
+        position = siblings.get(parent, 0)
+        siblings[parent] = position + 1
+        categories.append((key, _clean(themes[key].get("name") or str(key)), parent, position))
     return categories, entries
 
 
