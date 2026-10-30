@@ -12,6 +12,9 @@ SUPPORTED_SCHEMA_VERSIONS = {5}
 # Склади спільні для сім'ї, тож у них немає персонажа.
 FAMILY = ""
 
+# Інвентарі, теж спільні для всієї сім'ї (код контейнера): Enhancement Inventory.
+FAMILY_INVENTORY_CODES = {11}
+
 
 class SnapshotError(ValueError):
     pass
@@ -100,6 +103,44 @@ SCHEMA = """
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(SCHEMA)
+    _merge_family_inventories(connection)
+
+
+def _merge_family_inventories(connection: sqlite3.Connection) -> None:
+    """Зводить спільні інвентарі, збережені раніше окремо на кожного персонажа, в один сімейний."""
+    for code in FAMILY_INVENTORY_CODES:
+        rows = connection.execute(
+            "SELECT id, name FROM containers WHERE kind = 'inventory' AND game_code = ? AND character != ?",
+            (code, FAMILY),
+        ).fetchall()
+        if not rows:
+            continue
+
+        connection.execute(
+            """
+            INSERT INTO containers (kind, game_code, name, character)
+            VALUES ('inventory', ?, ?, ?)
+            ON CONFLICT (kind, game_code, character) DO NOTHING
+            """,
+            (code, rows[0][1], FAMILY),
+        )
+        family_id = connection.execute(
+            "SELECT id FROM containers WHERE kind = 'inventory' AND game_code = ? AND character = ?",
+            (code, FAMILY),
+        ).fetchone()[0]
+
+        old_ids = [row[0] for row in rows]
+        placeholders = ",".join("?" * len(old_ids))
+        connection.execute(
+            f"UPDATE OR IGNORE snapshot_containers SET container_id = ? WHERE container_id IN ({placeholders})",
+            (family_id, *old_ids),
+        )
+        connection.execute(f"DELETE FROM snapshot_containers WHERE container_id IN ({placeholders})", old_ids)
+        connection.execute(
+            f"UPDATE holdings SET container_id = ? WHERE container_id IN ({placeholders})",
+            (family_id, *old_ids),
+        )
+        connection.execute(f"DELETE FROM containers WHERE id IN ({placeholders})", old_ids)
 
 
 def decode_item_id(raw_item_id: int) -> tuple[int, int]:
@@ -195,7 +236,10 @@ def snapshot_sha256(data: dict) -> str:
 def _container_id(
     connection: sqlite3.Connection, container: ParsedContainer, character: str
 ) -> int:
-    owner = FAMILY if container.kind == "storage" else character
+    shared = container.kind == "storage" or (
+        container.kind == "inventory" and container.game_code in FAMILY_INVENTORY_CODES
+    )
+    owner = FAMILY if shared else character
     connection.execute(
         """
         INSERT INTO containers (kind, game_code, name, character)

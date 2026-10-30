@@ -1,11 +1,12 @@
 import json
 import os
 from pathlib import Path
+import sqlite3
 
 import pytest
 
 from conftest import destination, inventory_item, item, snapshot
-from snapshots import decode_item_id
+from snapshots import current_holdings, decode_item_id, initialize_schema
 
 
 def containers_by_name(client):
@@ -82,6 +83,60 @@ def test_empty_inventory_hydration_does_not_wipe_inventory(client):
     client.post("/api/snapshots", json=early_enter)
 
     assert containers_by_name(client)["Enhancement Inventory"]["items"][0]["quantity"] == 13
+
+
+def test_enhancement_inventory_is_shared_by_family(client):
+    first = snapshot(inventory_items=[
+        inventory_item(752021, 13, "0x01", 11, "Enhancement Inventory"),
+        inventory_item(44195, 3, "0x02", 0, "Main Inventory"),
+    ])
+    second = snapshot(inventory_items=[
+        inventory_item(752021, 15, "0x01", 11, "Enhancement Inventory"),
+        inventory_item(44195, 4, "0x02", 0, "Main Inventory"),
+    ])
+
+    client.post("/api/snapshots?character=Mirel", json=first)
+    client.post("/api/snapshots?character=Sefir", json=second)
+
+    containers = client.get("/api/holdings").json()["containers"]
+    enhancement = [c for c in containers if c["name"] == "Enhancement Inventory"]
+    assert len(enhancement) == 1
+    assert enhancement[0]["character"] is None
+    assert enhancement[0]["items"][0]["quantity"] == 15  # найсвіжіший знімок
+    main_inventories = sorted(c["character"] for c in containers if c["name"] == "Main Inventory")
+    assert main_inventories == ["Mirel", "Sefir"]
+
+
+def test_per_character_enhancement_inventories_are_merged():
+    # Так зберігали Enhancement Inventory до того, як він став сімейним.
+    connection = sqlite3.connect(":memory:")
+    initialize_schema(connection)
+    for snapshot_id, character, quantity in [(1, "Mirel", 13), (2, "Sefir", 15)]:
+        connection.execute(
+            "INSERT INTO snapshots (id, taken_at, character, schema_version, hydration_detected,"
+            " identity_complete, source_sha256) VALUES (?, '2026-10-28', ?, 5, 1, 1, ?)",
+            (snapshot_id, character, f"sha{snapshot_id}"),
+        )
+        container_id = connection.execute(
+            "INSERT INTO containers (kind, game_code, name, character)"
+            " VALUES ('inventory', 11, 'Enhancement Inventory', ?)",
+            (character,),
+        ).lastrowid
+        connection.execute("INSERT INTO snapshot_containers VALUES (?, ?)", (snapshot_id, container_id))
+        connection.execute(
+            "INSERT INTO holdings (snapshot_id, container_id, item_id, quantity, instance)"
+            " VALUES (?, ?, 752021, ?, '0x01')",
+            (snapshot_id, container_id, quantity),
+        )
+
+    initialize_schema(connection)
+
+    assert connection.execute("SELECT character FROM containers").fetchall() == [("",)]
+    connection.row_factory = sqlite3.Row
+    enhancement = current_holdings(connection)
+    assert len(enhancement) == 1
+    assert enhancement[0]["character"] is None
+    assert enhancement[0]["items"][0]["quantity"] == 15
 
 
 def test_newer_storage_snapshot_replaces_town_contents(client):

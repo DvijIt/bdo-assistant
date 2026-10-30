@@ -197,7 +197,10 @@ export default function InventoryPage() {
           <section className="panel">
             <div className="eyebrow">ПОТОЧНИЙ СТАН</div>
             {(["inventory", "currency", "storage"] as const).map((kind) => {
-              const group = containers.filter((container) => container.kind === kind);
+              // Спільні для сім'ї контейнери спершу, далі — згруповані за персонажем.
+              const group = containers
+                .filter((container) => container.kind === kind)
+                .sort((a, b) => (a.character ?? "").localeCompare(b.character ?? "") || a.name.localeCompare(b.name));
               if (group.length === 0) return null;
 
               return (
@@ -206,7 +209,10 @@ export default function InventoryPage() {
                   {group.map((container) => (
                     <details className="holdings-group" key={container.id}>
                       <summary>
-                        <strong>{container.name}</strong>
+                        <strong>
+                          {container.name}
+                          {kind !== "storage" && ` · ${container.character ?? "сім'я"}`}
+                        </strong>
                         <span>
                           {container.items.length} поз.
                           {containerValues.get(container.id) ? ` · ${formatSilver(containerValues.get(container.id)!)}` : ""}
