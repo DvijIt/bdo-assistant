@@ -3,9 +3,9 @@ import json
 import pytest
 
 pytest.importorskip("bdo_toolkit.account")
-from bdo_toolkit.account import (CharacterInfo, CompletedQuests, Contribution, GearItem,  # noqa: E402
-                                 KnowledgeBatch, KnowledgeEntry, NodeBatch, NodeState, OpenQuests, QuestKey,
-                                 Servant, SkillPoints, Worker)
+from bdo_toolkit.account import (CharacterInfo, CharacterSummary, CompletedQuests, Contribution, Equipment, GearItem,  # noqa: E402
+                                 KnowledgeBatch, KnowledgeEntry, LifeEquipment, NodeBatch, NodeState, OpenQuests,
+                                 QuestKey, Servant, SkillPoints, Worker)
 
 import main  # noqa: E402
 
@@ -85,6 +85,63 @@ def test_imported_names_replace_placeholders(client, extractor_output):
 
     (character,) = client.get("/api/characters").json()
     assert character["class_name"] == "Corsair"
+
+
+def test_equipped_and_life_gear(client, extractor_output):
+    client.post("/api/game-data/import", json={"path": str(extractor_output)})
+    save([
+        CharacterInfo(1.0, 7, "Mobix", "Testfam", 13, 1, 1, 1, slot=2),
+        # Повідомлення не називає персонажа: береться той, яким щойно зайшли у світ.
+        Equipment(1.0, None, (
+            GearItem(0, 18 << 24 | 49706, 1, 80, 100, 1),
+            GearItem(8, 3 << 24 | 49706, 1, 32767, 32767, 2),
+        )),
+        LifeEquipment(1.0, (GearItem(5, 49706, 1, 10, 100, 3),)),
+    ])
+
+    (character,) = client.get("/api/characters").json()
+    weapon, ring = character["gear"]
+    assert (weapon["slot_name"], weapon["item_id"], weapon["enhancement"], weapon["name"]) == \
+        ("main weapon", 49706, 18, "Test Prow")
+    assert (weapon["durability"], weapon["max_durability"]) == (80, 100)
+    assert (ring["slot_name"], ring["enhancement"], ring["durability"]) == ("ring", 3, None)
+
+    (pickaxe,) = client.get("/api/family").json()["life_gear"]
+    assert (pickaxe["slot_name"], pickaxe["enhancement"], pickaxe["durability"]) == ("pickaxe", 0, 10)
+
+    with main.get_connection() as connection:
+        owned, _ = main._owned_items(connection)
+    assert {"item_id": 49706, "enhancement": 18, "place": "Вдягнено: Mobix"} in owned
+    assert {"item_id": 49706, "enhancement": 0, "place": "Життєве спорядження"} in owned
+
+    # Новий вхід у світ замінює набір, а не додає до нього.
+    save([Equipment(2.0, 7, (GearItem(1, 49706, 1, 50, 100, 4),))])
+    (character,) = client.get("/api/characters").json()
+    assert [g["slot_name"] for g in character["gear"]] == ["sub-weapon"]
+
+
+def test_dream_horse_with_new_id_replaces_old_entry(client):
+    gear = (GearItem(3, 49706, 1, 100, 100, 5),)
+    save([Servant(1.0, 162655, "Forrest", 0, 1, gear)])
+    save([Servant(2.0, 31583, "Forrest", 0, 1, gear)])
+
+    servants = client.get("/api/servants").json()["servants"]
+    assert [(s["kind_id"], s["name"]) for s in servants] == [(31583, "Forrest")]
+    with main.get_connection() as connection:
+        assert [row[0] for row in connection.execute("SELECT DISTINCT kind_id FROM servant_gear")] == [31583]
+
+
+def test_character_summary_does_not_switch_current_character(client):
+    # Після патчу короткий профіль завжди називає одного персонажа, хоч би ким зайшли.
+    save([
+        CharacterInfo(1.0, 7, "Mobix", "Testfam", 13, 1, 1, 1, slot=2),
+        CharacterSummary(1.0, 8, "Other"),
+        SkillPoints(1.0, 5, 10),
+    ])
+
+    characters = {c["nick"]: c for c in client.get("/api/characters").json()}
+    assert characters["Mobix"]["skill_points"] == 5
+    assert characters["Other"]["skill_points"] is None
 
 
 def test_single_loc_dump_is_read_when_locs_folder_is_missing(client, tmp_path):

@@ -73,6 +73,31 @@ SCHEMA = """
         FOREIGN KEY (kind_id, name) REFERENCES servants (kind_id, name) ON DELETE CASCADE
     );
 
+    -- Бойове спорядження й костюми, вдягнені на персонажа; приходять при вході ним у світ.
+    -- item_id — без рівня заточки, він окремо в enhancement.
+    CREATE TABLE IF NOT EXISTS character_gear (
+        character_id INTEGER NOT NULL,
+        slot INTEGER NOT NULL,
+        slot_name TEXT NOT NULL,
+        item_id INTEGER NOT NULL,
+        enhancement INTEGER NOT NULL,
+        durability INTEGER NOT NULL,
+        max_durability INTEGER NOT NULL,
+        last_seen REAL NOT NULL,
+        PRIMARY KEY (character_id, slot)
+    );
+
+    -- Життєве спорядження спільне для сім'ї: кожен персонаж отримує той самий набір.
+    CREATE TABLE IF NOT EXISTS life_gear (
+        slot INTEGER PRIMARY KEY,
+        slot_name TEXT NOT NULL,
+        item_id INTEGER NOT NULL,
+        enhancement INTEGER NOT NULL,
+        durability INTEGER NOT NULL,
+        max_durability INTEGER NOT NULL,
+        last_seen REAL NOT NULL
+    );
+
     -- Книга знань спільна для сім'ї; рівень 1–5, ймовірно C…SS.
     CREATE TABLE IF NOT EXISTS knowledge (
         knowledge_id INTEGER PRIMARY KEY,
@@ -126,6 +151,11 @@ KNOWLEDGE_GRADES = {1: "C", 2: "B", 3: "A", 4: "4", 5: "S"}
 
 # Незнищенні предмети (наприклад, спорядження табору) мають максимальну міцність 32767.
 INDESTRUCTIBLE = 32767
+
+
+def _split_item_id(raw_item_id: int) -> tuple[int, int]:
+    """Старший байт item_id — рівень заточки, молодші 24 біти — ID предмета."""
+    return raw_item_id & 0xFFFFFF, raw_item_id >> 24
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -203,7 +233,8 @@ class AccountWriter:
 
     def _character_summary(self, connection: sqlite3.Connection, r) -> None:
         # Рівень беремо лише з досвіду: короткий профіль після левел-апу відстає.
-        self.current_character_id = r.character_id
+        # Після патчу 29.10 профіль завжди називає того самого персонажа, хоч би ким зайшли,
+        # тож поточного персонажа він не змінює.
         connection.execute(
             """
             INSERT INTO characters (character_id, nick, last_seen) VALUES (?, ?, ?)
@@ -240,6 +271,13 @@ class AccountWriter:
         )
 
     def _servant(self, connection: sqlite3.Connection, r) -> None:
+        # Після патчу 29.10 ID коней мрії приходить без старших бітів (162655 → 31583):
+        # прибираємо той самий транспорт під старим ID, щоб він не задвоювався.
+        for table in ("servant_gear", "servants"):
+            connection.execute(
+                f"DELETE FROM {table} WHERE name = ? AND kind_id != ? AND (kind_id & 65535) = ?",
+                (r.name, r.kind_id, r.kind_id & 0xFFFF),
+            )
         connection.execute(
             """
             INSERT INTO servants (kind_id, name, category, level_guess, last_seen) VALUES (?, ?, ?, ?, ?)
@@ -255,6 +293,38 @@ class AccountWriter:
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [(r.kind_id, r.name, g.slot, g.item_id, g.count, g.durability, g.max_durability) for g in r.gear],
+        )
+
+    def _equipment(self, connection: sqlite3.Connection, r) -> None:
+        # Повідомлення не називає персонажа; bdo_toolkit бере його з попереднього CharacterInfo.
+        character_id = r.character_id if r.character_id is not None else self.current_character_id
+        if character_id is None:
+            return
+        connection.execute("DELETE FROM character_gear WHERE character_id = ?", (character_id,))
+        connection.executemany(
+            """
+            INSERT INTO character_gear (character_id, slot, slot_name, item_id, enhancement,
+                                        durability, max_durability, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (character_id, g.slot, slot_name, *_split_item_id(g.item_id), g.durability, g.max_durability,
+                 r.observed_at)
+                for g, slot_name in zip(r.gear, r.slot_names)
+            ],
+        )
+
+    def _life_equipment(self, connection: sqlite3.Connection, r) -> None:
+        connection.execute("DELETE FROM life_gear")
+        connection.executemany(
+            """
+            INSERT INTO life_gear (slot, slot_name, item_id, enhancement, durability, max_durability, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (g.slot, slot_name, *_split_item_id(g.item_id), g.durability, g.max_durability, r.observed_at)
+                for g, slot_name in zip(r.gear, r.slot_names)
+            ],
         )
 
 
@@ -345,7 +415,45 @@ def knowledge_summary(connection: sqlite3.Connection, graded_ids: set[int] | Non
     }
 
 
+def _worn_item(row) -> dict:
+    return {
+        "slot": row["slot"],
+        "slot_name": row["slot_name"],
+        "item_id": row["item_id"],
+        "name": row["item_name"],
+        "grade": row["grade"],
+        "enhancement": row["enhancement"],
+        "durability": None if row["max_durability"] == INDESTRUCTIBLE else row["durability"],
+        "max_durability": None if row["max_durability"] == INDESTRUCTIBLE else row["max_durability"],
+    }
+
+
+def character_gear(connection: sqlite3.Connection) -> dict[int, list[dict]]:
+    gear: dict[int, list[dict]] = {}
+    for row in connection.execute(
+        """
+        SELECT g.*, i.name AS item_name, i.grade
+        FROM character_gear g LEFT JOIN items i ON i.item_id = g.item_id
+        ORDER BY g.character_id, g.slot
+        """
+    ):
+        gear.setdefault(row["character_id"], []).append(_worn_item(row))
+    return gear
+
+
+def life_gear(connection: sqlite3.Connection) -> list[dict]:
+    rows = connection.execute(
+        """
+        SELECT g.*, i.name AS item_name, i.grade
+        FROM life_gear g LEFT JOIN items i ON i.item_id = g.item_id
+        ORDER BY g.slot
+        """
+    ).fetchall()
+    return [_worn_item(row) for row in rows]
+
+
 def list_characters(connection: sqlite3.Connection) -> list[dict]:
+    gear = character_gear(connection)
     rows = connection.execute(
         "SELECT * FROM characters ORDER BY slot IS NULL, slot, last_seen DESC"
     ).fetchall()
@@ -363,6 +471,7 @@ def list_characters(connection: sqlite3.Connection) -> list[dict]:
             "xp_percent": (100 * row["xp"] / row["xp_to_next"]) if row["xp"] is not None and row["xp_to_next"] else None,
             "skill_points": row["skill_points"],
             "skill_points_total": row["skill_points_total"],
+            "gear": gear.get(row["character_id"], []),
             "last_seen": row["last_seen"],
         }
         for row in rows
@@ -401,6 +510,7 @@ def family_summary(connection: sqlite3.Connection) -> dict | None:
             "total": row["fame_combat"] + row["fame_life"] + row["fame_third"],
         },
         "contribution": contribution(connection),
+        "life_gear": life_gear(connection),
         "updated_at": row["updated_at"],
     }
 
@@ -464,7 +574,12 @@ def list_servants(connection: sqlite3.Connection, prices: dict[tuple[int, int], 
 def missing_gear_item_ids(connection: sqlite3.Connection) -> list[int]:
     rows = connection.execute(
         """
-        SELECT DISTINCT g.item_id FROM servant_gear g
+        SELECT DISTINCT g.item_id
+        FROM (
+            SELECT item_id FROM servant_gear
+            UNION SELECT item_id FROM character_gear
+            UNION SELECT item_id FROM life_gear
+        ) g
         LEFT JOIN items i ON i.item_id = g.item_id
         WHERE i.item_id IS NULL ORDER BY g.item_id
         """

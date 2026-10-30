@@ -413,7 +413,8 @@ def get_recipes():
 
 
 def _owned_items(connection) -> tuple[list[dict], dict[int, int]]:
-    """Предмети з останнього знімка складів і спорядження транспорту: [{item_id, enhancement, place}] і кількості."""
+    """Предмети з останнього знімка складів, вдягнене спорядження й спорядження транспорту:
+    [{item_id, enhancement, place}] і кількості."""
     owned, counts = [], {}
     for container in snapshots.current_holdings(connection):
         if container["kind"] == "currency":
@@ -426,6 +427,13 @@ def _owned_items(connection) -> tuple[list[dict], dict[int, int]]:
     for servant in account.list_servants(connection, {}):
         for gear in servant["gear"]:
             owned.append({"item_id": gear["item_id"], "enhancement": 0, "place": f"Транспорт: {servant['name']}"})
+    for character in account.list_characters(connection):
+        for gear in character["gear"]:
+            owned.append({"item_id": gear["item_id"], "enhancement": gear["enhancement"],
+                          "place": f"Вдягнено: {character['nick']}"})
+    for gear in account.life_gear(connection):
+        owned.append({"item_id": gear["item_id"], "enhancement": gear["enhancement"],
+                      "place": "Життєве спорядження"})
     return owned, counts
 
 

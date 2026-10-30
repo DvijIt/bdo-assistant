@@ -1,7 +1,78 @@
 "use client";
 
 import { AccountPage, EmptyState, useApiData } from "../_components/AccountPage";
+import { GameImage } from "../_components/GameImage";
 import { formatSeen } from "../_lib/api";
+
+type WornItem = {
+  slot: number;
+  slot_name: string;
+  item_id: number;
+  name: string | null;
+  grade: number | null;
+  enhancement: number;
+  durability: number | null;
+  max_durability: number | null;
+};
+
+// Назви слотів з bdo_toolkit англійською; невідомі приходять як "slot#21".
+const SLOT_LABELS: Record<string, string> = {
+  "main weapon": "Основна зброя", "sub-weapon": "Додаткова зброя", "awakening weapon": "Зброя пробудження",
+  armor: "Броня", gloves: "Рукавиці", shoes: "Чоботи", helmet: "Шолом",
+  necklace: "Намисто", ring: "Перстень", earring: "Сережка", belt: "Пояс",
+  "alchemy stone": "Алхімічний камінь", tome: "Том", artifact: "Артефакт",
+  "lumbering axe": "Сокира", "fluid collector": "Збирач рідини", hoe: "Мотика", "butcher knife": "Ніж м'ясника",
+  "tanning knife": "Ніж для шкур", pickaxe: "Кирка",
+};
+
+const GRADES = ["PRI", "DUO", "TRI", "TET", "PEN"];
+const ACCESSORY_SLOTS = new Set(["necklace", "ring", "earring", "belt"]);
+const WEAPON_ARMOR_SLOTS = new Set([
+  "main weapon", "sub-weapon", "awakening weapon", "armor", "gloves", "shoes", "helmet",
+]);
+
+// Аксесуари рахують PRI–PEN як 1–5, бойова зброя й броня — як 16–20; решта — просто +N.
+function enhancementLabel(item: WornItem) {
+  const level = item.enhancement;
+  if (level <= 0) return "";
+  if (ACCESSORY_SLOTS.has(item.slot_name) && level <= 5) return GRADES[level - 1];
+  if (WEAPON_ARMOR_SLOTS.has(item.slot_name) && level >= 16 && level <= 20) return GRADES[level - 16];
+  return `+${level}`;
+}
+
+function slotLabel(slotName: string) {
+  if (slotName.startsWith("slot#")) return "Інший слот";
+  const costume = slotName.startsWith("costume ");
+  const base = costume ? slotName.slice("costume ".length) : slotName;
+  const label = SLOT_LABELS[base] ?? base;
+  return costume ? `Костюм: ${label.toLowerCase()}` : label;
+}
+
+function GearList({ gear }: { gear: WornItem[] }) {
+  return (
+    <ul className="account-gear">
+      {gear.map((item) => (
+        <li key={item.slot}>
+          <GameImage kind="item" id={item.item_id} size={32} className="account-gear-icon" />
+          <div>
+            <strong>
+              {enhancementLabel(item) && `${enhancementLabel(item)} `}
+              {item.name ?? `Предмет #${item.item_id}`}
+            </strong>
+            <span>{slotLabel(item.slot_name)}</span>
+          </div>
+          {item.max_durability !== null && item.durability !== null ? (
+            <span className={item.durability < item.max_durability * 0.5 ? "warn" : undefined}>
+              {item.durability}/{item.max_durability}
+            </span>
+          ) : (
+            <span className="inventory-muted">∞</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 type Character = {
   character_id: string;
@@ -15,6 +86,7 @@ type Character = {
   xp_percent: number | null;
   skill_points: number | null;
   skill_points_total: number | null;
+  gear: WornItem[];
   last_seen: number;
 };
 
@@ -22,6 +94,7 @@ type Family = {
   name: string | null;
   fame: { combat: number; life: number; third: number; total: number };
   contribution: { available: number; total: number } | null;
+  life_gear: WornItem[];
   updated_at: number;
 } | null;
 
@@ -63,6 +136,15 @@ export default function CharactersPage() {
               </div>
             )}
           </dl>
+          {family.data!.life_gear.length > 0 && (
+            <details className="holdings-group">
+              <summary>
+                <strong>Життєве спорядження</strong>
+                <span>{family.data!.life_gear.length} поз. · спільне для сім&apos;ї</span>
+              </summary>
+              <GearList gear={family.data!.life_gear} />
+            </details>
+          )}
         </section>
       )}
 
@@ -94,6 +176,15 @@ export default function CharactersPage() {
                 <p className="inventory-muted">
                   Очки навичок {character.skill_points.toLocaleString("uk-UA")} / {character.skill_points_total.toLocaleString("uk-UA")}
                 </p>
+              )}
+              {character.gear.length > 0 && (
+                <details className="holdings-group">
+                  <summary>
+                    <strong>Спорядження</strong>
+                    <span>{character.gear.length} поз.</span>
+                  </summary>
+                  <GearList gear={character.gear} />
+                </details>
               )}
               <p className="account-seen">Оновлено {formatSeen(character.last_seen)}</p>
             </article>
