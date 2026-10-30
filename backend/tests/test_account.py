@@ -146,6 +146,26 @@ def test_knowledge_from_several_batches(client):
     assert knowledge["ungraded"] is None  # назви не імпортовано
 
 
+def test_agent_decoder_reads_post_restart_knowledge_book():
+    from types import SimpleNamespace
+
+    decoder = agent_module.default_decoder_factory()
+    records = [(4150, 5), (5831, 2)]
+    payload = bytearray((2599).to_bytes(4, "little") + len(records).to_bytes(2, "little"))
+    for knowledge_id, level in records:
+        payload.extend(b"\0")
+        payload.extend(knowledge_id.to_bytes(4, "little"))
+        payload.extend(b"\0\0\0")
+        payload.append(level)
+        payload.extend(b"\0" * 5)
+
+    message = SimpleNamespace(flag=0, opcode=0x16D6, payload=bytes(payload), observed_at=123.0)
+    (record,) = decoder.feed(message)
+
+    assert record == KnowledgeBatch(123.0, 2599, (KnowledgeEntry(4150, 5), KnowledgeEntry(5831, 2)))
+    assert decoder.feed(SimpleNamespace(**{**vars(message), "payload": bytes(payload[:-1])})) == []
+
+
 class FakeSession:
     def __init__(self, messages):
         self.messages = list(messages)

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "bdo-companion": {
+      "command": "D:\\Projects\\bdo-assistant\\backend\\.venv\\Scripts\\python.exe",
+      "args": [
+        "D:\\Projects\\bdo-assistant\\backend\\mcp_server.py"
+      ],
+      "env": {
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}

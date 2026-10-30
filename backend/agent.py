@@ -20,6 +20,9 @@ POLL_SECONDS = 0.2
 EVENT_QUEUE_SIZE = 200_000
 # Скільки чекати після даних персонажа, поки дійдуть інвентар і склади.
 INVENTORY_SETTLE_SECONDS = 15.0
+KNOWLEDGE_BOOK_OPCODE = 0x16D6
+KNOWLEDGE_BOOK_HEADER_SIZE = 6
+KNOWLEDGE_BOOK_ENTRY_SIZE = 14
 
 
 def default_session_factory():
@@ -30,9 +33,40 @@ def default_session_factory():
 
 
 def default_decoder_factory():
-    from bdo_toolkit.account import AccountDecoder
+    from bdo_toolkit.account import AccountDecoder, KnowledgeBatch, KnowledgeEntry
 
-    return AccountDecoder()
+    return _AccountStreamDecoder(AccountDecoder(), KnowledgeBatch, KnowledgeEntry)
+
+
+class _AccountStreamDecoder:
+    def __init__(self, decoder, knowledge_batch, knowledge_entry) -> None:
+        self._decoder = decoder
+        self._knowledge_batch = knowledge_batch
+        self._knowledge_entry = knowledge_entry
+
+    def feed(self, message):
+        if message.flag == 0 and message.opcode == KNOWLEDGE_BOOK_OPCODE:
+            payload = message.payload
+            if len(payload) < KNOWLEDGE_BOOK_HEADER_SIZE:
+                return []
+
+            ecology_points = int.from_bytes(payload[:4], "little")
+            count = int.from_bytes(payload[4:6], "little")
+            if len(payload) != KNOWLEDGE_BOOK_HEADER_SIZE + count * KNOWLEDGE_BOOK_ENTRY_SIZE:
+                return []
+
+            entries = []
+            for index in range(count):
+                offset = KNOWLEDGE_BOOK_HEADER_SIZE + index * KNOWLEDGE_BOOK_ENTRY_SIZE
+                knowledge_id = int.from_bytes(payload[offset + 1:offset + 5], "little")
+                level = payload[offset + 8]
+                if knowledge_id == 0 or not 1 <= level <= 5:
+                    return []
+                entries.append(self._knowledge_entry(knowledge_id, level))
+
+            return [self._knowledge_batch(message.observed_at, ecology_points, tuple(entries))]
+
+        return self._decoder.feed(message)
 
 
 def default_inventory_session_factory(profile):
